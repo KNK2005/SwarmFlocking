@@ -58,7 +58,11 @@ def _dispatch_backend(context, *args, **kwargs):
     pkg_flocking = get_package_share_directory('swarm_flocking')
     backend = context.launch_configurations.get('backend', 'headless').strip().lower()
 
-    def _headless_include():
+    def _headless_include(force_rviz: bool = False):
+        rviz_arg = context.launch_configurations.get('enable_rviz', 'false')
+        if force_rviz and rviz_arg.strip() == 'false':
+            rviz_arg = 'true'
+
         return IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(pkg_flocking, 'launch', 'headless_sim.launch.py')
@@ -67,7 +71,7 @@ def _dispatch_backend(context, *args, **kwargs):
                 'num_robots': context.launch_configurations.get('num_robots', '6'),
                 'use_sim_time': 'false',
                 'dt': context.launch_configurations.get('dt', '0.1'),
-                'enable_rviz': context.launch_configurations.get('enable_rviz', 'false'),
+                'enable_rviz': rviz_arg,
                 'success_timeout_s': context.launch_configurations.get('success_timeout_s', '300.0'),
                 'auto_shutdown_on_completion': context.launch_configurations.get('auto_shutdown_on_completion', 'true'),
                 'waypoints': context.launch_configurations.get('waypoints', ''),
@@ -92,7 +96,7 @@ def _dispatch_backend(context, *args, **kwargs):
             )
             return [
                 LogInfo(msg=msg),
-                _headless_include(),
+                _headless_include(force_rviz=True),
             ]
 
         return [
