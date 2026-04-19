@@ -183,6 +183,14 @@ class FlockMonitorNode(Node):
         self.get_logger().info(
             f'FlockMonitorNode started — monitoring {self.num_robots} robots at {self.monitor_rate_hz:.2f} Hz')
 
+    def _safe_shutdown_context(self) -> None:
+        """Shutdown default context if still valid; ignore teardown races."""
+        try:
+            if rclpy.ok(context=self.context):
+                rclpy.shutdown(context=self.context)
+        except Exception:
+            pass
+
     # ====================================================================
     # Callbacks
     # ====================================================================
@@ -475,7 +483,7 @@ class FlockMonitorNode(Node):
             self._shutdown_timer.cancel()
             self._shutdown_timer = None
         self.get_logger().info("Flushing complete. Triggering safe system tear-down.")
-        rclpy.shutdown()
+        self._safe_shutdown_context()
 
     # ====================================================================
     # Split detection via BFS
@@ -685,8 +693,7 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        node._safe_shutdown_context()
 
 
 if __name__ == '__main__':

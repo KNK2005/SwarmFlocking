@@ -35,6 +35,15 @@ def generate_launch_description():
             'dt', default_value='0.1',
             description='Physics timestep for headless backend'),
         DeclareLaunchArgument(
+            'enable_rviz', default_value='false',
+            description='Launch RViz when running headless backend'),
+        DeclareLaunchArgument(
+            'success_timeout_s', default_value='300.0',
+            description='Monitor timeout in seconds before completion'),
+        DeclareLaunchArgument(
+            'auto_shutdown_on_completion', default_value='true',
+            description='Auto-stop nodes when monitor completes'),
+        DeclareLaunchArgument(
             'waypoints', default_value='[8.0, 7.5, 15.0, 7.5, 22.0, 7.5, 28.0, 7.5]',
             description='Flat waypoint list [x0,y0,x1,y1,...] for headless backend'),
         DeclareLaunchArgument(
@@ -58,6 +67,9 @@ def _dispatch_backend(context, *args, **kwargs):
                 'num_robots': context.launch_configurations.get('num_robots', '6'),
                 'use_sim_time': 'false',
                 'dt': context.launch_configurations.get('dt', '0.1'),
+                'enable_rviz': context.launch_configurations.get('enable_rviz', 'false'),
+                'success_timeout_s': context.launch_configurations.get('success_timeout_s', '300.0'),
+                'auto_shutdown_on_completion': context.launch_configurations.get('auto_shutdown_on_completion', 'true'),
                 'waypoints': context.launch_configurations.get('waypoints', ''),
                 'spawn_coords': context.launch_configurations.get('spawn_coords', ''),
             }.items(),

@@ -125,6 +125,16 @@ def _spawn_all(context, *args, **kwargs):
             "On Ubuntu 24/Jazzy, use headless backend if these assets are not available:\n"
             "  ros2 launch swarm_flocking portable_sim.launch.py backend:=headless\n"
         )
+    try:
+        get_package_share_directory('gazebo_ros')
+    except Exception:
+        raise RuntimeError(
+            "Could not find 'gazebo_ros'. "
+            "This launch file uses Gazebo Classic spawn_entity.py. "
+            "On Ubuntu 24/Jazzy, use headless backend or install Gazebo Classic ROS bridge packages.\n"
+            "Headless fallback command:\n"
+            "  ros2 launch swarm_flocking portable_sim.launch.py backend:=headless\n"
+        )
 
     pkg_flocking = get_package_share_directory('swarm_flocking')
     params_file  = os.path.join(pkg_flocking, 'config', 'flocking_params.yaml')

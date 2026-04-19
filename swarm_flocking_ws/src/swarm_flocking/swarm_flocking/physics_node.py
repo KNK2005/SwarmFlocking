@@ -14,6 +14,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
@@ -48,8 +49,16 @@ class PhysicsNode(Node):
         self.declare_parameter('scan_range_min', 0.12)
         self.declare_parameter('scan_range_max', 3.5)
         self.declare_parameter('publish_tf', True)
-        self.declare_parameter('spawn_coords', [])  # flat [x0,y0,x1,y1,...]
-        self.declare_parameter('obstacle_segments', [])
+        self.declare_parameter(
+            'spawn_coords',
+            [0.0],
+            ParameterDescriptor(type=ParameterType.PARAMETER_DOUBLE_ARRAY),
+        )  # flat [x0,y0,x1,y1,...]
+        self.declare_parameter(
+            'obstacle_segments',
+            [0.0],
+            ParameterDescriptor(type=ParameterType.PARAMETER_DOUBLE_ARRAY),
+        )
 
         self.num_robots = int(self.get_parameter('num_robots').value)
         self.max_lin = float(self.get_parameter('max_linear_vel').value)

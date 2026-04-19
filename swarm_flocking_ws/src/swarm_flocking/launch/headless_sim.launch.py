@@ -43,6 +43,9 @@ def generate_launch_description():
         DeclareLaunchArgument('num_robots', default_value='6', description='Number of robots in headless sim'),
         DeclareLaunchArgument('use_sim_time', default_value='false', description='Use ROS sim time in headless mode'),
         DeclareLaunchArgument('dt', default_value='0.1', description='Headless physics integration time step'),
+        DeclareLaunchArgument('enable_rviz', default_value='false', description='Launch RViz for visual demo'),
+        DeclareLaunchArgument('success_timeout_s', default_value='300.0', description='Monitor timeout in seconds before completion'),
+        DeclareLaunchArgument('auto_shutdown_on_completion', default_value='true', description='Auto-stop nodes when monitor completes'),
         DeclareLaunchArgument(
             'waypoints',
             default_value='[8.0, 7.5, 15.0, 7.5, 22.0, 7.5, 28.0, 7.5]',
@@ -60,10 +63,16 @@ def generate_launch_description():
 def _build_headless_graph(context, *args, **kwargs):
     pkg_flocking = get_package_share_directory('swarm_flocking')
     params_file = os.path.join(pkg_flocking, 'config', 'flocking_params.yaml')
+    rviz_cfg = os.path.join(pkg_flocking, 'config', 'rviz_config.rviz')
 
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
     use_sim_time = context.launch_configurations.get('use_sim_time', 'false').lower() == 'true'
     dt = float(context.launch_configurations.get('dt', '0.1'))
+    enable_rviz = context.launch_configurations.get('enable_rviz', 'false').lower() == 'true'
+    success_timeout_s = float(context.launch_configurations.get('success_timeout_s', '300.0'))
+    auto_shutdown_on_completion = (
+        context.launch_configurations.get('auto_shutdown_on_completion', 'true').lower() == 'true'
+    )
 
     waypoints = _parse_float_list(context.launch_configurations.get('waypoints', ''))
     spawn_flat = _parse_float_list(context.launch_configurations.get('spawn_coords', ''))
@@ -100,10 +109,24 @@ def _build_headless_graph(context, *args, **kwargs):
                     'use_sim_time': use_sim_time,
                     'num_robots': num_robots,
                     'waypoints': waypoints,
+                    'success_timeout_s': success_timeout_s,
+                    'auto_shutdown_on_completion': auto_shutdown_on_completion,
                 },
             ],
         )
     )
+
+    if enable_rviz:
+        actions.append(
+            Node(
+                package='rviz2',
+                executable='rviz2',
+                name='rviz2',
+                arguments=['-d', rviz_cfg],
+                parameters=[{'use_sim_time': use_sim_time}],
+                output='screen',
+            )
+        )
 
     # 3. Decentralized boid nodes
     for i in range(num_robots):
