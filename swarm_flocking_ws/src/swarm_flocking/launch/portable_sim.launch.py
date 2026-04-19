@@ -16,7 +16,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
@@ -49,7 +49,40 @@ def _dispatch_backend(context, *args, **kwargs):
     pkg_flocking = get_package_share_directory('swarm_flocking')
     backend = context.launch_configurations.get('backend', 'headless').strip().lower()
 
+    def _headless_include():
+        return IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_flocking, 'launch', 'headless_sim.launch.py')
+            ),
+            launch_arguments={
+                'num_robots': context.launch_configurations.get('num_robots', '6'),
+                'use_sim_time': 'false',
+                'dt': context.launch_configurations.get('dt', '0.1'),
+                'waypoints': context.launch_configurations.get('waypoints', ''),
+                'spawn_coords': context.launch_configurations.get('spawn_coords', ''),
+            }.items(),
+        )
+
     if backend == 'gazebo':
+        # full_sim.launch.py uses Gazebo Classic spawn_entity flow. On Jazzy,
+        # many systems only have gz-sim packages, so we degrade gracefully.
+        missing_pkgs = []
+        for pkg in ('gazebo_ros', 'turtlebot3_gazebo', 'turtlebot3_description'):
+            try:
+                get_package_share_directory(pkg)
+            except Exception:
+                missing_pkgs.append(pkg)
+
+        if missing_pkgs:
+            msg = (
+                '[portable_sim] backend:=gazebo requested, but required Gazebo Classic '
+                f'packages are missing: {missing_pkgs}. Falling back to backend:=headless.'
+            )
+            return [
+                LogInfo(msg=msg),
+                _headless_include(),
+            ]
+
         return [
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -64,20 +97,7 @@ def _dispatch_backend(context, *args, **kwargs):
         ]
 
     if backend == 'headless':
-        return [
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(pkg_flocking, 'launch', 'headless_sim.launch.py')
-                ),
-                launch_arguments={
-                    'num_robots': context.launch_configurations.get('num_robots', '6'),
-                    'use_sim_time': 'false',
-                    'dt': context.launch_configurations.get('dt', '0.1'),
-                    'waypoints': context.launch_configurations.get('waypoints', ''),
-                    'spawn_coords': context.launch_configurations.get('spawn_coords', ''),
-                }.items(),
-            )
-        ]
+        return [_headless_include()]
 
     raise RuntimeError(
         f"Unsupported backend '{backend}'. Expected 'headless' or 'gazebo'."

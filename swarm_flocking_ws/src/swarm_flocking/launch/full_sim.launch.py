@@ -40,7 +40,7 @@ def generate_launch_description():
     world_file = PathJoinSubstitution([
         pkg_gazebo,
         'worlds',
-        PythonExpression([LaunchConfiguration('world_name'), " + '.world'"])
+        PythonExpression(["'", LaunchConfiguration('world_name'), "' + '.world'"])
     ])
     params_file  = os.path.join(pkg_flocking, 'config', 'flocking_params.yaml')
     rviz_cfg     = os.path.join(pkg_flocking, 'config', 'rviz_config.rviz')
