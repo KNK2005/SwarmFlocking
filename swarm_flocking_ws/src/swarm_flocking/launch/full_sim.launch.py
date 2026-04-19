@@ -84,6 +84,12 @@ def generate_launch_description():
         name='rviz2',
         arguments=['-d', rviz_cfg],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        additional_env={
+            'LIBGL_ALWAYS_SOFTWARE': '1',
+            'QT_XCB_GL_INTEGRATION': 'none',
+            'MESA_GL_VERSION_OVERRIDE': '3.3',
+            'MESA_GLSL_VERSION_OVERRIDE': '330',
+        },
         output='screen',
     )
 
