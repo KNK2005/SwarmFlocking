@@ -1,0 +1,269 @@
+<?xml version="1.0" ?>
+<!--
+  obstacle_course.world — 30×15m structured obstacle course for swarm flocking.
+
+  Layout (top view, Y-axis up):
+  ┌──────────────────────────────────────────────────────────────────────────┐ Y=15
+  │  START ZONE          │■ BOTTLENECK ■│  OPEN FIELD  │ MAZE │ GOAL ZONE  │
+  │  [robots start here] │  gap ≈ 1.5m  │              │      │    [G]     │
+  └──────────────────────────────────────────────────────────────────────────┘ Y=0
+  X: 0────────────────8──────9──────────15──────────20──────────27─────30
+
+  Robot start positions ≈ (2–4, 4–6).
+  Waypoints: (8,7.5) → (15,7.5) → (22,7.5) → (28,7.5)
+-->
+<sdf version="1.7">
+  <world name="obstacle_course">
+
+    <!-- ──────────── Physics & rendering ──────────── -->
+    <gravity>0 0 -9.8</gravity>
+    <physics type="ode">
+      <real_time_update_rate>1000</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>150</iters>
+        </solver>
+      </ode>
+    </physics>
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- ──────────── Standard ground plane & sun ──────────── -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- ══════════════════════════════════════════════════════
+         OUTER BOUNDARY WALLS  (30 × 15 m arena)
+    ══════════════════════════════════════════════════════ -->
+
+    <!-- North wall (top) -->
+    <model name="wall_north">
+      <static>true</static>
+      <pose>15 15 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>30.4 0.2 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>30.4 0.2 1.0</size></box></geometry>
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- South wall (bottom) -->
+    <model name="wall_south">
+      <static>true</static>
+      <pose>15 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>30.4 0.2 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>30.4 0.2 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient><diffuse>0.7 0.7 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- West wall (left) -->
+    <model name="wall_west">
+      <static>true</static>
+      <pose>0 7.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>0.2 15.4 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.2 15.4 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient><diffuse>0.7 0.7 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- East wall (right) -->
+    <model name="wall_east">
+      <static>true</static>
+      <pose>30 7.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>0.2 15.4 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.2 15.4 1.0</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient><diffuse>0.7 0.7 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         BOTTLENECK — vertical wall at X=8.5, gap at Y≈6.75–8.25 (1.5 m)
+         Lower segment: Y=0 to Y=6.75  → center=(8.5, 3.375), length=6.75
+         Upper segment: Y=8.25 to Y=15 → center=(8.5, 11.625), length=6.75
+    ══════════════════════════════════════════════════════ -->
+
+    <model name="bottleneck_south">
+      <static>true</static>
+      <pose>8.5 3.375 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>0.25 6.75 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.25 6.75 1.0</size></box></geometry>
+          <material>
+            <ambient>0.8 0.4 0.1 1</ambient>
+            <diffuse>0.8 0.4 0.1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bottleneck_north">
+      <static>true</static>
+      <pose>8.5 11.625 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>0.25 6.75 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.25 6.75 1.0</size></box></geometry>
+          <material>
+            <ambient>0.8 0.4 0.1 1</ambient>
+            <diffuse>0.8 0.4 0.1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         OPEN FIELD DIVIDER — partial wall at X=14, gap on north side
+         Segment: Y=0 to Y=5  → center=(14, 2.5), length=5
+    ══════════════════════════════════════════════════════ -->
+
+    <model name="divider_south">
+      <static>true</static>
+      <pose>14 2.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c">
+          <geometry><box><size>0.25 5.0 1.0</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>0.25 5.0 1.0</size></box></geometry>
+          <material>
+            <ambient>0.6 0.6 0.6 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         MAZE SECTION  (X=19 to X=27)
+         Staggered walls to force the flock to navigate around them.
+    ══════════════════════════════════════════════════════ -->
+
+    <!-- Maze wall 1: horizontal, south side -->
+    <model name="maze_h1">
+      <static>true</static>
+      <pose>21 4.0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>4.0 0.25 1.0</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>4.0 0.25 1.0</size></box></geometry>
+          <material><ambient>0.5 0.2 0.6 1</ambient><diffuse>0.5 0.2 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Maze wall 2: horizontal, north side -->
+    <model name="maze_h2">
+      <static>true</static>
+      <pose>23 11.0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>4.0 0.25 1.0</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>4.0 0.25 1.0</size></box></geometry>
+          <material><ambient>0.5 0.2 0.6 1</ambient><diffuse>0.5 0.2 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Maze wall 3: vertical, center -->
+    <model name="maze_v1">
+      <static>true</static>
+      <pose>24 7.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.25 4.0 1.0</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>0.25 4.0 1.0</size></box></geometry>
+          <material><ambient>0.5 0.2 0.6 1</ambient><diffuse>0.5 0.2 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Maze wall 4: vertical, right side -->
+    <model name="maze_v2">
+      <static>true</static>
+      <pose>26.5 5.0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.25 5.0 1.0</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>0.25 5.0 1.0</size></box></geometry>
+          <material><ambient>0.5 0.2 0.6 1</ambient><diffuse>0.5 0.2 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Maze wall 5: horizontal, exit funnel -->
+    <model name="maze_h3">
+      <static>true</static>
+      <pose>26 10.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>3.0 0.25 1.0</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>3.0 0.25 1.0</size></box></geometry>
+          <material><ambient>0.5 0.2 0.6 1</ambient><diffuse>0.5 0.2 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         GOAL ZONE — flat green disc at (28, 7.5)
+    ══════════════════════════════════════════════════════ -->
+
+    <model name="goal_marker">
+      <static>true</static>
+      <pose>28 7.5 0.01 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry>
+            <cylinder>
+              <radius>1.5</radius>
+              <length>0.02</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0 0.9 0 0.6</ambient>
+            <diffuse>0 0.9 0 0.6</diffuse>
+            <emissive>0 0.4 0 0</emissive>
+          </material>
+        </visual>
+        <!-- No collision on goal marker — purely visual -->
+      </link>
+    </model>
+
+  </world>
+</sdf>

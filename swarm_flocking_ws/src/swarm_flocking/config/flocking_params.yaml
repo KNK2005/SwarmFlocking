@@ -1,0 +1,73 @@
+# config/flocking_params.yaml
+# Tunable parameters for the swarm flocking simulation.
+# All BoidNode and FlockMonitorNode instances load this file.
+#
+# Tuning guide:
+#   w_separation: Raise if robots collide. Typical range: 1.0 – 3.0
+#   w_alignment:  Raise for tighter heading synchronization. Range: 0.5 – 2.0
+#   w_cohesion:   Raise to keep flock more compact. Range: 0.5 – 2.0
+#   w_obstacle:   Critical for safe navigation. Keep > separation. Range: 2.0 – 5.0
+#   w_migration:  Gentle global pull. Too high makes flock ignore obstacles. Range: 0.1 – 0.8
+#   neighbor_radius: Larger = more cooperative but more CPU. Range: 2.0 – 5.0
+#   separation_radius: Should be > robot_diameter (0.178m for TurtleBot3 Burger)
+
+/**:
+  ros__parameters:
+    # Total robots in the swarm (override per-node via launch)
+    num_robots: 6
+
+    # ─── Reynolds Force Weights ───────────────────────────────────────────────
+    w_separation: 1.5     # Highest priority: avoid robot-robot collision
+    w_alignment:  1.0     # Match flock's average heading
+    w_cohesion:   1.0     # Pull toward flock centroid
+    w_obstacle:   2.5     # Reactive obstacle avoidance (LaserScan-based)
+    w_migration:  0.3     # Weak global pull toward current waypoint
+
+    # ─── Sensing Ranges (meters) ──────────────────────────────────────────────
+    neighbor_radius:    3.0   # Max range to consider another robot a neighbor
+    separation_radius:  0.8   # Below this, separation force activates
+    obstacle_threshold: 0.6   # Laser reading below this triggers avoidance
+
+    # ─── Motion Limits ────────────────────────────────────────────────────────
+    max_linear_vel:  0.20     # m/s (TurtleBot3 Burger hardware limit: 0.22 m/s)
+    max_angular_vel: 1.5      # rad/s
+    lpf_alpha: 0.4            # Velocity low-pass smoothing factor
+    waypoint_arrival_radius: 1.2
+    stop_on_goal_reached: true
+
+    # ─── Adaptive Control Bounds ──────────────────────────────────────────────
+    k_sep: 0.5
+    min_sep_w: 1.0
+    max_sep_w: 3.0
+    alpha_coh: 0.2
+    min_coh_w: 0.5
+    max_coh_w: 2.0
+    ideal_separation: 1.0
+    threshold_spread: 1.5
+    min_obs_w: 1.0
+    max_obs_w: 5.0
+    laser_epsilon: 0.01
+
+    # ─── Experiment Management (flock_monitor_node) ─────────────────────────
+    monitor_rate_hz: 2.0
+    rolling_window_s: 10.0
+    goal_tolerance: 1.2
+    success_timeout_s: 300.0
+    success_max_collision_rate: 0.20
+    success_max_mean_cohesion: 3.5
+    auto_shutdown_on_completion: true
+    csv_filename: experiment_results.csv
+    log_interval_s: 5.0
+
+    # ─── Waypoints (flat list: x0, y0, x1, y1, ...) ──────────────────────────
+    # Matches the obstacle_course.world layout:
+    #   Start zone → through bottleneck → open field → goal zone
+    waypoints:
+      - 8.0    # WP0 x — approach bottleneck
+      - 7.5    # WP0 y
+      - 15.0   # WP1 x — cross open field
+      - 7.5    # WP1 y
+      - 22.0   # WP2 x — enter maze section
+      - 7.5    # WP2 y
+      - 28.0   # WP3 x — reach goal zone
+      - 7.5    # WP3 y

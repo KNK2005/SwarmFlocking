@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>swarm_flocking_gazebo</name>
+  <version>1.0.0</version>
+  <description>Gazebo world files and models for the swarm flocking simulation.</description>
+  <maintainer email="dev@example.com">Swarm Dev</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!--
+    This package ships simulator assets (worlds/models/launch files).
+    Runtime simulator backend dependencies are intentionally not hard-pinned
+    so the workspace can build on both:
+      - Ubuntu 22.04 / ROS 2 Humble (Gazebo Classic)
+      - Ubuntu 24.04 / ROS 2 Jazzy (ros_gz_sim / Gazebo Harmonic)
+  -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

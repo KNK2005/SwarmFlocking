@@ -1,0 +1,41 @@
+# ROS 2 / colcon build artifacts
+build/
+install/
+log/
+**/build/
+**/install/
+**/log/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Coverage and reports
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime outputs
+experiment_results.csv
+*.db3
+*.mcap
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.env.*
+venv/
+.venv/
