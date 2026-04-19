@@ -80,6 +80,73 @@ ros2 launch swarm_flocking portable_sim.launch.py \
   backend:=gazebo num_robots:=6 world_name:=obstacle_course
 ```
 
+## Ubuntu 22.04 Quick Start (ROS 2 Humble)
+
+### 1. Install ROS 2 Humble and required packages
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ros-humble-desktop \
+  ros-humble-rmw-fastrtps-cpp \
+  ros-humble-gazebo-ros-pkgs \
+  ros-humble-turtlebot3-gazebo \
+  ros-humble-turtlebot3-description \
+  python3-colcon-common-extensions \
+  python3-rosdep \
+  python3-vcstool \
+  git
+```
+
+### 2. Initialize rosdep
+
+```bash
+sudo rosdep init 2>/dev/null || true
+rosdep update
+```
+
+### 3. Clone and build
+
+```bash
+cd ~
+git clone <your-repo-url>.git
+cd swarm_flocking_ws/swarm_flocking_ws
+
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+
+colcon build --symlink-install \
+  --packages-select swarm_interfaces swarm_flocking swarm_flocking_gazebo
+
+source install/setup.bash
+```
+
+### 4. Run simulation
+
+Set runtime environment:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/swarm_flocking_ws/swarm_flocking_ws/install/setup.bash
+
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_DOMAIN_ID=0
+export TURTLEBOT3_MODEL=burger
+```
+
+Headless:
+
+```bash
+ros2 launch swarm_flocking portable_sim.launch.py backend:=headless num_robots:=6
+```
+
+Gazebo backend:
+
+```bash
+ros2 launch swarm_flocking portable_sim.launch.py \
+  backend:=gazebo num_robots:=6 world_name:=obstacle_course
+```
+
 ## Monitoring and Tuning
 
 In a second terminal:
