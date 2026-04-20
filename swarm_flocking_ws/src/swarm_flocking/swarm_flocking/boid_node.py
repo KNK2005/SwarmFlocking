@@ -254,6 +254,9 @@ class BoidNode(Node):
         # We add these offsets to convert odom-frame pose to world-frame pose.
         self.declare_parameter('spawn_x', 0.0)
         self.declare_parameter('spawn_y', 0.0)
+        # If true, /odom starts at (0,0) in robot-local frame and needs
+        # (spawn_x, spawn_y) offset. If false, /odom is already world-frame.
+        self.declare_parameter('odom_is_local', True)
         # Waypoints stored as a flat list: [x0, y0, x1, y1, ...]
         self.declare_parameter('waypoints', [12.0, 1.0, 12.0, 7.0, 12.0, 13.0])
 
@@ -276,6 +279,7 @@ class BoidNode(Node):
         self.stop_on_goal = bool(self.get_parameter('stop_on_goal_reached').value)
         self.spawn_x      = float(self.get_parameter('spawn_x').value)
         self.spawn_y      = float(self.get_parameter('spawn_y').value)
+        self.odom_is_local = bool(self.get_parameter('odom_is_local').value)
 
         # Adaptive scaling parameters
         self.k_sep         = float(self.get_parameter('k_sep').value)
@@ -370,6 +374,8 @@ class BoidNode(Node):
                     ]
                     if self.current_wp >= len(self.waypoints):
                         self.current_wp = max(0, len(self.waypoints) - 1)
+                elif name == 'odom_is_local':
+                    self.odom_is_local = bool(value)
 
             return SetParametersResult(successful=True)
         except Exception as exc:
@@ -382,18 +388,24 @@ class BoidNode(Node):
     def _odom_callback(self, msg: Odometry) -> None:
         """Extract pose and velocity from /odom.
 
-        CRITICAL: Gazebo's diff_drive odom is in the robot's local frame
-        starting at (0, 0). We add (spawn_x, spawn_y) to convert to
-        world-frame coordinates so that inter-robot distance calculations
-        are correct.
+                Odom handling mode:
+                    - odom_is_local=True: odom starts near (0,0) per robot and needs
+                        (spawn_x, spawn_y) offset to recover world-frame coordinates.
+                    - odom_is_local=False: odom is already world-referenced and should
+                        be used as-is.
         """
         pos = msg.pose.pose.position
         ori = msg.pose.pose.orientation
         theta = yaw_from_quaternion(ori)
 
-        # Convert odom-local → world-frame by adding spawn offset
-        world_x = pos.x + self.spawn_x
-        world_y = pos.y + self.spawn_y
+        if self.odom_is_local:
+            # Convert odom-local -> world-frame by adding spawn offset.
+            world_x = pos.x + self.spawn_x
+            world_y = pos.y + self.spawn_y
+        else:
+            # Odom is already world-referenced (typical with ros_gz Harmonic bridge).
+            world_x = pos.x
+            world_y = pos.y
         self.my_pose = (world_x, world_y, theta)
 
         # World-frame velocity (rotate body-frame twist by yaw)
