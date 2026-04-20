@@ -257,6 +257,8 @@ class BoidNode(Node):
         self.declare_parameter('front_slowdown_distance', 1.0)
         self.declare_parameter('min_front_speed_scale', 0.2)
         self.declare_parameter('front_fov_deg',      80.0)
+        self.declare_parameter('front_stop_distance', 0.35)
+        self.declare_parameter('escape_turn_rate',   2.0)
         self.declare_parameter('goal_projection_min', 0.45)
         self.declare_parameter('goal_projection_gain', 1.2)
         self.declare_parameter('goal_projection_max_boost', 1.4)
@@ -313,6 +315,8 @@ class BoidNode(Node):
         self.front_slowdown_dist = float(self.get_parameter('front_slowdown_distance').value)
         self.min_front_speed_scale = float(self.get_parameter('min_front_speed_scale').value)
         self.front_fov_deg = float(self.get_parameter('front_fov_deg').value)
+        self.front_stop_dist = float(self.get_parameter('front_stop_distance').value)
+        self.escape_turn_rate = float(self.get_parameter('escape_turn_rate').value)
         self.goal_proj_min = float(self.get_parameter('goal_projection_min').value)
         self.goal_proj_gain = float(self.get_parameter('goal_projection_gain').value)
         self.goal_proj_max_boost = float(self.get_parameter('goal_projection_max_boost').value)
@@ -400,6 +404,10 @@ class BoidNode(Node):
                     self.min_front_speed_scale = clamp(float(value), 0.0, 1.0)
                 elif name == 'front_fov_deg':
                     self.front_fov_deg = clamp(float(value), 20.0, 180.0)
+                elif name == 'front_stop_distance':
+                    self.front_stop_dist = max(0.05, float(value))
+                elif name == 'escape_turn_rate':
+                    self.escape_turn_rate = max(0.1, float(value))
                 elif name == 'goal_projection_min':
                     self.goal_proj_min = max(0.0, float(value))
                 elif name == 'goal_projection_gain':
@@ -606,6 +614,8 @@ class BoidNode(Node):
                 eff_w_coh = clamp(eff_w_coh * (1.0 + 0.45 * proximity), self.min_coh_w, self.max_coh_w)
                 scale = min(self.max_obs_w / self.w_obs if self.w_obs > 0 else 1.0, self.obs_thresh / safe_dist)
                 eff_w_obs = clamp(self.w_obs * scale, self.min_obs_w, self.max_obs_w)
+                if safe_dist <= self.front_stop_dist:
+                    eff_w_obs = self.max_obs_w
 
         # When far from the active waypoint, increase migration pull to sustain progress.
         if self.current_wp < len(self.waypoints):
@@ -634,7 +644,8 @@ class BoidNode(Node):
         if self.current_wp < len(self.waypoints) and (f_mig[0] != 0.0 or f_mig[1] != 0.0):
             goal_dot = fx * f_mig[0] + fy * f_mig[1]
             dist_scale = clamp(wp_dist / 5.0, 0.9, 1.8)
-            obs_scale = clamp(1.0 - obstacle_proximity / max(self.goal_proj_obs_relax, 0.05), 0.2, 1.0)
+            obs_ratio = obstacle_proximity / max(self.goal_proj_obs_relax, 0.05)
+            obs_scale = clamp(1.0 - obs_ratio * obs_ratio, 0.0, 1.0)
             proj_floor = self.goal_proj_min * dist_scale * obs_scale
             if goal_dot < proj_floor:
                 boost = clamp((proj_floor - goal_dot) * self.goal_proj_gain, 0.0, self.goal_proj_max_boost)
@@ -651,10 +662,22 @@ class BoidNode(Node):
                     (1.0 - self.lpf_alpha) * self._smooth_ang)
 
         # Step 6: clamp and publish
-        front_speed_scale = self._compute_front_speed_scale()
+        front_min = self._get_front_min_distance()
+        front_speed_scale = self._compute_front_speed_scale(front_min)
+        lin_cmd = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
+        ang_cmd = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
+
+        # Hard safety near walls: stop forward motion and force turn toward freer side.
+        if math.isfinite(front_min) and front_min <= self.front_stop_dist:
+            lin_cmd = min(0.0, lin_cmd)
+            turn_dir = self._compute_escape_turn_direction()
+            desired_escape = turn_dir * self.escape_turn_rate
+            if abs(ang_cmd) < abs(desired_escape):
+                ang_cmd = desired_escape
+
         cmd = Twist()
-        cmd.linear.x  = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
-        cmd.angular.z = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
+        cmd.linear.x  = lin_cmd
+        cmd.angular.z = clamp(ang_cmd, -self.max_ang, self.max_ang)
         self.cmd_pub.publish(cmd)
 
         # Step 7: advance waypoint when close enough
@@ -743,29 +766,63 @@ class BoidNode(Node):
                 count += 1
         return count
 
-    def _compute_front_speed_scale(self) -> float:
-        """Return [min_front_speed_scale, 1.0] based on nearest obstacle ahead."""
+    def _get_front_min_distance(self) -> float:
+        """Return minimum finite front-beam distance within configured FOV."""
         scan = self.latest_scan
         if scan is None or not getattr(scan, 'ranges', None):
-            return 1.0
+            return float('inf')
 
         half_fov = math.radians(max(1.0, self.front_fov_deg) * 0.5)
         min_front = float('inf')
 
         for i, r in enumerate(scan.ranges):
-            if not math.isfinite(r):
-                continue
-            if r <= 0.0:
+            if not math.isfinite(r) or r <= 0.0:
                 continue
             angle = scan.angle_min + i * scan.angle_increment
             if abs(angle) <= half_fov:
                 min_front = min(min_front, r)
 
-        if not math.isfinite(min_front):
+        return min_front
+
+    def _compute_escape_turn_direction(self) -> float:
+        """Pick a turn direction toward the side with larger nearby clearance."""
+        scan = self.latest_scan
+        if scan is None or not getattr(scan, 'ranges', None):
             return 1.0
 
+        left_min = float('inf')
+        right_min = float('inf')
+
+        for i, r in enumerate(scan.ranges):
+            if not math.isfinite(r) or r <= 0.0:
+                continue
+            angle = scan.angle_min + i * scan.angle_increment
+            if 0.3 <= angle <= (math.pi / 2.0):
+                left_min = min(left_min, r)
+            elif (-math.pi / 2.0) <= angle <= -0.3:
+                right_min = min(right_min, r)
+
+        if not math.isfinite(left_min) and not math.isfinite(right_min):
+            return 1.0
+        if not math.isfinite(left_min):
+            return -1.0
+        if not math.isfinite(right_min):
+            return 1.0
+        return 1.0 if left_min >= right_min else -1.0
+
+    def _compute_front_speed_scale(self, front_min: Optional[float] = None) -> float:
+        """Return [min_front_speed_scale, 1.0] based on nearest obstacle ahead."""
+        if front_min is None:
+            front_min = self._get_front_min_distance()
+
+        if not math.isfinite(front_min):
+            return 1.0
+
+        if front_min <= self.front_stop_dist:
+            return 0.0
+
         proximity = clamp(
-            (self.front_slowdown_dist - min_front) / max(self.front_slowdown_dist, self.laser_eps),
+            (self.front_slowdown_dist - front_min) / max(self.front_slowdown_dist, self.laser_eps),
             0.0,
             1.0,
         )
