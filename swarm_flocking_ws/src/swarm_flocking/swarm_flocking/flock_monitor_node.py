@@ -121,6 +121,10 @@ class FlockMonitorNode(Node):
         self.declare_parameter('goal_tolerance', 1.2)
         self.declare_parameter('waypoint_reach_radius', 1.5)
         self.declare_parameter('waypoint_reach_fraction', 0.6)
+        self.declare_parameter('waypoint_bottleneck_guard_enable', True)
+        self.declare_parameter('waypoint_bottleneck_guard_margin', 0.25)
+        self.declare_parameter('waypoint_guard_window_x', 1.2)
+        self.declare_parameter('bottleneck_center_x', 8.5)
         self.declare_parameter('split_recovery_trigger_s', 3.0)
         self.declare_parameter('split_recovery_duration_s', 5.0)
         self.declare_parameter('emergency_w_cohesion', 4.0)
@@ -141,6 +145,10 @@ class FlockMonitorNode(Node):
         self.goal_tolerance = max(0.1, float(self.get_parameter('goal_tolerance').value))
         self.waypoint_reach_radius = max(0.1, float(self.get_parameter('waypoint_reach_radius').value))
         self.waypoint_reach_fraction = min(1.0, max(0.1, float(self.get_parameter('waypoint_reach_fraction').value)))
+        self.wp_bneck_guard_enable = bool(self.get_parameter('waypoint_bottleneck_guard_enable').value)
+        self.wp_bneck_guard_margin = max(0.05, float(self.get_parameter('waypoint_bottleneck_guard_margin').value))
+        self.wp_guard_window_x = max(0.2, float(self.get_parameter('waypoint_guard_window_x').value))
+        self.bneck_cx = float(self.get_parameter('bottleneck_center_x').value)
         self.split_recovery_trigger_s = max(0.5, float(self.get_parameter('split_recovery_trigger_s').value))
         self.split_recovery_duration_s = max(0.5, float(self.get_parameter('split_recovery_duration_s').value))
         self.emergency_w_cohesion = max(0.0, float(self.get_parameter('emergency_w_cohesion').value))
@@ -351,6 +359,7 @@ class FlockMonitorNode(Node):
             near_count = sum(
                 1
                 for rid in active_ids
+                if self._passes_waypoint_bottleneck_guard(self.robot_states[rid].x, active_wp[0])
                 if math.hypot(self.robot_states[rid].x - active_wp[0], self.robot_states[rid].y - active_wp[1])
                 <= self.waypoint_reach_radius
             )
@@ -510,6 +519,21 @@ class FlockMonitorNode(Node):
             return None
         idx = max(0, min(self.current_waypoint_index, len(self.waypoints) - 1))
         return self.waypoints[idx]
+
+    def _passes_waypoint_bottleneck_guard(self, robot_x: float, waypoint_x: float) -> bool:
+        """Reject waypoint quorum counts when robot is on wrong side of bottleneck wall."""
+        if not self.wp_bneck_guard_enable:
+            return True
+
+        if abs(waypoint_x - self.bneck_cx) > self.wp_guard_window_x:
+            return True
+
+        margin = self.wp_bneck_guard_margin
+        if waypoint_x >= (self.bneck_cx + margin):
+            return robot_x >= (self.bneck_cx + margin)
+        if waypoint_x <= (self.bneck_cx - margin):
+            return robot_x <= (self.bneck_cx - margin)
+        return True
 
     def _candidate_boid_node_names(self, rid: int) -> List[str]:
         return [

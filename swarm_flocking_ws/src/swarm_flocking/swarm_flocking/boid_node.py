@@ -291,6 +291,9 @@ class BoidNode(Node):
         self.declare_parameter('goal_projection_obs_relax', 0.85)
         self.declare_parameter('waypoint_sync_fraction', 0.35)
         self.declare_parameter('waypoint_sync_radius_scale', 1.6)
+        self.declare_parameter('waypoint_bottleneck_guard_enable', True)
+        self.declare_parameter('waypoint_bottleneck_guard_margin', 0.25)
+        self.declare_parameter('waypoint_guard_window_x', 1.2)
         self.declare_parameter('sync_enable', True)
         self.declare_parameter('sync_leader_id', 0)
         self.declare_parameter('sync_columns', 3)
@@ -397,6 +400,9 @@ class BoidNode(Node):
         self.goal_proj_obs_relax = float(self.get_parameter('goal_projection_obs_relax').value)
         self.wp_sync_fraction = float(self.get_parameter('waypoint_sync_fraction').value)
         self.wp_sync_radius_scale = float(self.get_parameter('waypoint_sync_radius_scale').value)
+        self.wp_bneck_guard_enable = bool(self.get_parameter('waypoint_bottleneck_guard_enable').value)
+        self.wp_bneck_guard_margin = float(self.get_parameter('waypoint_bottleneck_guard_margin').value)
+        self.wp_guard_window_x = float(self.get_parameter('waypoint_guard_window_x').value)
         self.sync_enable = bool(self.get_parameter('sync_enable').value)
         self.sync_leader_id = int(self.get_parameter('sync_leader_id').value)
         self.sync_columns = max(1, int(self.get_parameter('sync_columns').value))
@@ -549,6 +555,12 @@ class BoidNode(Node):
                     self.wp_sync_fraction = clamp(float(value), 0.0, 1.0)
                 elif name == 'waypoint_sync_radius_scale':
                     self.wp_sync_radius_scale = max(1.0, float(value))
+                elif name == 'waypoint_bottleneck_guard_enable':
+                    self.wp_bneck_guard_enable = bool(value)
+                elif name == 'waypoint_bottleneck_guard_margin':
+                    self.wp_bneck_guard_margin = clamp(float(value), 0.05, 1.5)
+                elif name == 'waypoint_guard_window_x':
+                    self.wp_guard_window_x = clamp(float(value), 0.2, 5.0)
                 elif name == 'sync_enable':
                     self.sync_enable = bool(value)
                 elif name == 'sync_leader_id':
@@ -1131,6 +1143,8 @@ class BoidNode(Node):
             return
         gx, gy = self.waypoints[self.current_wp]
         if math.hypot(gx - my_x, gy - my_y) < self.wp_arrival_r:
+            if not self._passes_waypoint_bottleneck_guard(my_x, gx):
+                return
             active_neigh = self._count_active_neighbours()
             if active_neigh > 0:
                 required = max(1, int(math.ceil(active_neigh * self.wp_sync_fraction)))
@@ -1162,9 +1176,26 @@ class BoidNode(Node):
         for np in self.neighbour_poses.values():
             if (now - np.timestamp) > STALE_TIMEOUT_S:
                 continue
+            if not self._passes_waypoint_bottleneck_guard(np.x, gx):
+                continue
             if math.hypot(np.x - gx, np.y - gy) <= radius:
                 count += 1
         return count
+
+    def _passes_waypoint_bottleneck_guard(self, robot_x: float, waypoint_x: float) -> bool:
+        """Reject waypoint completion when robot is on wrong side of bottleneck wall."""
+        if not self.wp_bneck_guard_enable or not self.bottleneck_mode_enable:
+            return True
+
+        if abs(waypoint_x - self.bneck_cx) > self.wp_guard_window_x:
+            return True
+
+        margin = self.wp_bneck_guard_margin
+        if waypoint_x >= (self.bneck_cx + margin):
+            return robot_x >= (self.bneck_cx + margin)
+        if waypoint_x <= (self.bneck_cx - margin):
+            return robot_x <= (self.bneck_cx - margin)
+        return True
 
     def _normalize_vec(self, x: float, y: float) -> Tuple[float, float]:
         """Safely normalize a 2-D vector."""

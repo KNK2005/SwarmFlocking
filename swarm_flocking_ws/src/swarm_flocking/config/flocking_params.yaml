@@ -68,8 +68,11 @@
     goal_projection_gain: 1.2
     goal_projection_max_boost: 1.4
     goal_projection_obs_relax: 0.85
-    waypoint_sync_fraction: 0.15
+    waypoint_sync_fraction: 0.45
     waypoint_sync_radius_scale: 1.6
+    waypoint_bottleneck_guard_enable: true
+    waypoint_bottleneck_guard_margin: 0.25
+    waypoint_guard_window_x: 1.2
     sync_enable: true
     sync_leader_id: 2
     sync_columns: 3
@@ -116,7 +119,11 @@
     rolling_window_s: 10.0
     goal_tolerance: 1.2
     waypoint_reach_radius: 1.5
-    waypoint_reach_fraction: 0.6
+    waypoint_reach_fraction: 0.75
+    waypoint_bottleneck_guard_enable: true
+    waypoint_bottleneck_guard_margin: 0.25
+    waypoint_guard_window_x: 1.2
+    bottleneck_center_x: 8.5
     split_recovery_trigger_s: 3.0
     split_recovery_duration_s: 5.0
     emergency_w_cohesion: 4.0
