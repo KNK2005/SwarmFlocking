@@ -68,14 +68,22 @@ SENSOR_QOS = QoSProfile(
     durability=QoSDurabilityPolicy.VOLATILE,
 )
 
-# Placeholder path sequence for bottleneck traversal.
-# NOTE: These coordinates must be adjusted to match the actual world layout.
+# Default path sequence aligned to obstacle_course.world geometry.
+# bottleneck_south pose: (8.5, 3.375), bottleneck_north pose: (8.5, 11.625),
+# green endpoint marker: (28.0, 7.5).
+# NOTE: Override via ROS param 'waypoints' if your world differs.
 WAYPOINTS = [
-    (0.0, 0.0),
-    (-2.0, 0.0),
-    (-4.5, 0.0),
-    (-6.0, 0.0),
-    (-8.5, 2.5),
+    (5.5, 6.0),
+    (7.6, 7.3),
+    (8.5, 7.5),
+    (9.4, 7.5),
+    (13.5, 7.5),
+    (18.5, 7.5),
+    (22.0, 8.8),
+    (23.7, 9.8),
+    (25.4, 9.8),
+    (27.6, 8.6),
+    (28.0, 7.5),
 ]
 
 

@@ -106,7 +106,10 @@
     stall_escalation_gain: 0.25
     desync_log_cooldown_s: 20.0
     use_monitor_waypoint: false
-    context_bottleneck_min_scan: 0.60
+    context_bottleneck_min_scan: 0.55
+    context_weight_lpf_alpha: 0.05
+    force_floor_min_mag: 0.16
+    force_floor_boost: 0.60
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0

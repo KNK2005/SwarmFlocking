@@ -165,6 +165,8 @@ class BoidNode(Node):
         self._progress_wp_idx: int = -1
         self._monitor_waypoint: Optional[Tuple[float, float]] = None
         self._monitor_waypoint_ts: float = 0.0
+        self.smooth_w_cohesion: float = self.w_coh
+        self.smooth_w_separation: float = self.w_sep
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -327,6 +329,9 @@ class BoidNode(Node):
         self.declare_parameter('use_monitor_waypoint', False)
         self.declare_parameter('monitor_waypoint_timeout_s', 3.0)
         self.declare_parameter('context_bottleneck_min_scan', 0.8)
+        self.declare_parameter('context_weight_lpf_alpha', 0.05)
+        self.declare_parameter('force_floor_min_mag', 0.15)
+        self.declare_parameter('force_floor_boost', 0.6)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -430,6 +435,9 @@ class BoidNode(Node):
         self.use_monitor_waypoint = bool(self.get_parameter('use_monitor_waypoint').value)
         self.monitor_waypoint_timeout_s = float(self.get_parameter('monitor_waypoint_timeout_s').value)
         self.context_bottleneck_min_scan = float(self.get_parameter('context_bottleneck_min_scan').value)
+        self.context_weight_lpf_alpha = float(self.get_parameter('context_weight_lpf_alpha').value)
+        self.force_floor_min_mag = float(self.get_parameter('force_floor_min_mag').value)
+        self.force_floor_boost = float(self.get_parameter('force_floor_boost').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -617,6 +625,12 @@ class BoidNode(Node):
                     self.monitor_waypoint_timeout_s = max(0.1, float(value))
                 elif name == 'context_bottleneck_min_scan':
                     self.context_bottleneck_min_scan = clamp(float(value), 0.2, 2.5)
+                elif name == 'context_weight_lpf_alpha':
+                    self.context_weight_lpf_alpha = clamp(float(value), 0.01, 1.0)
+                elif name == 'force_floor_min_mag':
+                    self.force_floor_min_mag = clamp(float(value), 0.01, 2.0)
+                elif name == 'force_floor_boost':
+                    self.force_floor_boost = clamp(float(value), 0.0, 3.0)
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -908,10 +922,17 @@ class BoidNode(Node):
         mig_mult = clamp(mig_mult, 0.0, 4.0)
         obs_mult = clamp(obs_mult, 0.0, 4.0)
 
-        eff_w_sep = clamp(eff_w_sep * sep_mult, 0.0, max(0.1, self.max_sep_w * 4.0))
-        eff_w_coh = clamp(eff_w_coh * coh_mult, 0.0, max(0.1, self.max_coh_w * 4.0))
+        target_w_sep = clamp(eff_w_sep * sep_mult, 0.0, max(0.1, self.max_sep_w * 4.0))
+        target_w_coh = clamp(eff_w_coh * coh_mult, 0.0, max(0.1, self.max_coh_w * 4.0))
         eff_w_mig = clamp(eff_w_mig * mig_mult, 0.0, max(0.1, self.w_mig * 6.0))
         eff_w_obs = clamp(eff_w_obs * obs_mult, 0.0, max(0.1, self.max_obs_w * 4.0))
+
+        # Smooth weight transitions to avoid abrupt flock breakup at context boundaries.
+        alpha = clamp(self.context_weight_lpf_alpha, 0.01, 1.0)
+        self.smooth_w_separation += alpha * (target_w_sep - self.smooth_w_separation)
+        self.smooth_w_cohesion += alpha * (target_w_coh - self.smooth_w_cohesion)
+        eff_w_sep = clamp(self.smooth_w_separation, 0.0, max(0.1, self.max_sep_w * 4.0))
+        eff_w_coh = clamp(self.smooth_w_cohesion, 0.0, max(0.1, self.max_coh_w * 4.0))
 
         # Detect local progress stalls and temporarily relax sync to unblock.
         speed_mag = math.hypot(my_vx, my_vy)
@@ -956,6 +977,12 @@ class BoidNode(Node):
             side_y = math.cos(my_theta)
             fx += clamp(side_x * wall_balance, -1.0, 1.0)
             fy += clamp(side_y * wall_balance, -1.0, 1.0)
+
+        # Cancellation guard: ensure a small migration-aligned component survives competing forces.
+        net_mag = math.hypot(fx, fy)
+        if target_wp is not None and (f_mig[0] != 0.0 or f_mig[1] != 0.0) and net_mag < self.force_floor_min_mag:
+            fx += clamp(self.force_floor_boost * f_mig[0], -1.0, 1.0)
+            fy += clamp(self.force_floor_boost * f_mig[1], -1.0, 1.0)
 
         fx = clamp(fx, -25.0, 25.0)
         fy = clamp(fy, -25.0, 25.0)
@@ -1396,24 +1423,38 @@ class BoidNode(Node):
             return 'FRAGMENTED'
         return 'OPEN_FIELD'
 
+    def get_sector_min(self, ranges, angle_start_deg, angle_end_deg) -> float:
+        """Return minimum valid range within a degree sector for any scan resolution."""
+        n = len(ranges)
+        if n == 0:
+            return float('inf')
+
+        a0 = float(angle_start_deg) % 360.0
+        a1 = float(angle_end_deg) % 360.0
+        i_start = int((a0 / 360.0) * n)
+        i_end = int((a1 / 360.0) * n)
+
+        if i_start == i_end:
+            i_end = min(n, i_start + 1)
+
+        if i_start < i_end:
+            sector = ranges[i_start:i_end]
+        else:
+            sector = ranges[i_start:] + ranges[:i_end]
+
+        valid = [r for r in sector if math.isfinite(r) and r > 0.05]
+        return min(valid) if valid else float('inf')
+
     def compute_wall_balance_force(self, scan_ranges) -> float:
         """Compute bounded lateral offset from left/right wall distance mismatch."""
         if not scan_ranges:
             return 0.0
 
-        n = len(scan_ranges)
-        left_lo = min(60, n)
-        left_hi = min(121, n)
-        right_lo = min(240, n)
-        right_hi = min(301, n)
-
-        left_vals = [r for r in scan_ranges[left_lo:left_hi] if math.isfinite(r) and r > 0.0]
-        right_vals = [r for r in scan_ranges[right_lo:right_hi] if math.isfinite(r) and r > 0.0]
-        if not left_vals or not right_vals:
+        left_dist = self.get_sector_min(scan_ranges, 60.0, 120.0)
+        right_dist = self.get_sector_min(scan_ranges, 240.0, 300.0)
+        if not math.isfinite(left_dist) or not math.isfinite(right_dist):
             return 0.0
 
-        left_dist = sum(left_vals) / float(len(left_vals))
-        right_dist = sum(right_vals) / float(len(right_vals))
         lateral = (left_dist - right_dist) * 0.5
         return clamp(lateral, -1.0, 1.0)
 
