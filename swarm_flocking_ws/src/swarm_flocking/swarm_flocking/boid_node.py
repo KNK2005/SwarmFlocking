@@ -257,6 +257,12 @@ class BoidNode(Node):
         self.declare_parameter('front_slowdown_distance', 1.0)
         self.declare_parameter('min_front_speed_scale', 0.2)
         self.declare_parameter('front_fov_deg',      80.0)
+        self.declare_parameter('goal_projection_min', 0.45)
+        self.declare_parameter('goal_projection_gain', 1.2)
+        self.declare_parameter('goal_projection_max_boost', 1.4)
+        self.declare_parameter('goal_projection_obs_relax', 0.85)
+        self.declare_parameter('waypoint_sync_fraction', 0.35)
+        self.declare_parameter('waypoint_sync_radius_scale', 1.6)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -307,6 +313,12 @@ class BoidNode(Node):
         self.front_slowdown_dist = float(self.get_parameter('front_slowdown_distance').value)
         self.min_front_speed_scale = float(self.get_parameter('min_front_speed_scale').value)
         self.front_fov_deg = float(self.get_parameter('front_fov_deg').value)
+        self.goal_proj_min = float(self.get_parameter('goal_projection_min').value)
+        self.goal_proj_gain = float(self.get_parameter('goal_projection_gain').value)
+        self.goal_proj_max_boost = float(self.get_parameter('goal_projection_max_boost').value)
+        self.goal_proj_obs_relax = float(self.get_parameter('goal_projection_obs_relax').value)
+        self.wp_sync_fraction = float(self.get_parameter('waypoint_sync_fraction').value)
+        self.wp_sync_radius_scale = float(self.get_parameter('waypoint_sync_radius_scale').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -388,6 +400,18 @@ class BoidNode(Node):
                     self.min_front_speed_scale = clamp(float(value), 0.0, 1.0)
                 elif name == 'front_fov_deg':
                     self.front_fov_deg = clamp(float(value), 20.0, 180.0)
+                elif name == 'goal_projection_min':
+                    self.goal_proj_min = max(0.0, float(value))
+                elif name == 'goal_projection_gain':
+                    self.goal_proj_gain = max(0.0, float(value))
+                elif name == 'goal_projection_max_boost':
+                    self.goal_proj_max_boost = max(0.0, float(value))
+                elif name == 'goal_projection_obs_relax':
+                    self.goal_proj_obs_relax = max(0.05, float(value))
+                elif name == 'waypoint_sync_fraction':
+                    self.wp_sync_fraction = clamp(float(value), 0.0, 1.0)
+                elif name == 'waypoint_sync_radius_scale':
+                    self.wp_sync_radius_scale = max(1.0, float(value))
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -539,6 +563,8 @@ class BoidNode(Node):
         eff_w_mig = self.w_mig
         regroup_w = 0.0
         f_regroup = (0.0, 0.0)
+        obstacle_proximity = 0.0
+        wp_dist = 0.0
 
         if neighbours:
             # 1. Crowding Response (Bounded Separation Scaling)
@@ -573,6 +599,7 @@ class BoidNode(Node):
                 min_laser_dist = min(valid_ranges)
                 safe_dist = max(min_laser_dist, self.laser_eps)
                 proximity = clamp((self.obs_thresh - safe_dist) / max(self.obs_thresh, self.laser_eps), 0.0, 1.0)
+                obstacle_proximity = proximity
                 # Keep a migration floor near obstacles to avoid stall/spin lock.
                 eff_w_mig = self.w_mig * (1.0 - 0.55 * proximity)
                 eff_w_ali = self.w_ali * (1.0 + 0.35 * proximity)
@@ -602,6 +629,17 @@ class BoidNode(Node):
               eff_w_obs * f_obs[1] +
               eff_w_mig * f_mig[1] +
               regroup_w * f_regroup[1])
+
+        # Enforce a minimum net component toward waypoint direction.
+        if self.current_wp < len(self.waypoints) and (f_mig[0] != 0.0 or f_mig[1] != 0.0):
+            goal_dot = fx * f_mig[0] + fy * f_mig[1]
+            dist_scale = clamp(wp_dist / 5.0, 0.9, 1.8)
+            obs_scale = clamp(1.0 - obstacle_proximity / max(self.goal_proj_obs_relax, 0.05), 0.2, 1.0)
+            proj_floor = self.goal_proj_min * dist_scale * obs_scale
+            if goal_dot < proj_floor:
+                boost = clamp((proj_floor - goal_dot) * self.goal_proj_gain, 0.0, self.goal_proj_max_boost)
+                fx += boost * f_mig[0]
+                fy += boost * f_mig[1]
 
         # Step 4: convert resultant force → (linear, angular) commands
         lin, ang = force_to_cmd_vel(fx, fy, my_theta, self.max_lin, self.max_ang)
@@ -677,10 +715,33 @@ class BoidNode(Node):
             return
         gx, gy = self.waypoints[self.current_wp]
         if math.hypot(gx - my_x, gy - my_y) < self.wp_arrival_r:
+            active_neigh = self._count_active_neighbours()
+            if active_neigh > 0:
+                required = max(1, int(math.ceil(active_neigh * self.wp_sync_fraction)))
+                sync_radius = self.wp_arrival_r * self.wp_sync_radius_scale
+                near_count = self._count_neighbours_near_waypoint(gx, gy, sync_radius)
+                if near_count < required:
+                    return
             self.get_logger().info(
                 f'robot_{self.robot_id} reached waypoint {self.current_wp} '
                 f'({gx}, {gy}) → advancing')
             self.current_wp += 1
+
+    def _count_active_neighbours(self) -> int:
+        """Count fresh neighbour poses irrespective of distance."""
+        now = time.monotonic()
+        return sum(1 for np in self.neighbour_poses.values() if (now - np.timestamp) <= STALE_TIMEOUT_S)
+
+    def _count_neighbours_near_waypoint(self, gx: float, gy: float, radius: float) -> int:
+        """Count fresh neighbours currently near the active waypoint."""
+        now = time.monotonic()
+        count = 0
+        for np in self.neighbour_poses.values():
+            if (now - np.timestamp) > STALE_TIMEOUT_S:
+                continue
+            if math.hypot(np.x - gx, np.y - gy) <= radius:
+                count += 1
+        return count
 
     def _compute_front_speed_scale(self) -> float:
         """Return [min_front_speed_scale, 1.0] based on nearest obstacle ahead."""

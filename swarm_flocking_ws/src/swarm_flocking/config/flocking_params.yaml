@@ -55,6 +55,12 @@
     front_slowdown_distance: 0.85
     min_front_speed_scale: 0.35
     front_fov_deg: 80.0
+    goal_projection_min: 0.45
+    goal_projection_gain: 1.2
+    goal_projection_max_boost: 1.4
+    goal_projection_obs_relax: 0.85
+    waypoint_sync_fraction: 0.35
+    waypoint_sync_radius_scale: 1.6
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0
