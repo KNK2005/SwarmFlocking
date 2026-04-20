@@ -17,35 +17,35 @@
     num_robots: 6
 
     # ─── Reynolds Force Weights ───────────────────────────────────────────────
-    w_separation: 1.5     # Highest priority: avoid robot-robot collision
-    w_alignment:  1.15    # Stronger heading synchronization in clutter
-    w_cohesion:   1.25    # Keep flock tighter near obstacles
-    w_obstacle:   3.6     # Reactive obstacle avoidance (LaserScan-based)
-    w_migration:  0.18    # Reduced pull so robots do not force through walls
+    w_separation: 1.1     # Prevent collisions without over-dispersing at spawn
+    w_alignment:  1.2     # Strong heading synchronization
+    w_cohesion:   1.4     # Keep flock compact through corridor turns
+    w_obstacle:   3.4     # Reactive obstacle avoidance (LaserScan-based)
+    w_migration:  0.42    # Stronger waypoint pull for steady forward progress
 
     # ─── Sensing Ranges (meters) ──────────────────────────────────────────────
-    neighbor_radius:    3.0   # Max range to consider another robot a neighbor
-    separation_radius:  0.8   # Below this, separation force activates
-    obstacle_threshold: 0.9   # Earlier avoidance trigger in narrow corridors
+    neighbor_radius:    3.8   # Improve group connectivity in larger spread
+    separation_radius:  0.6   # Avoid strong initial repulsion at spawn spacing
+    obstacle_threshold: 0.85  # Early avoidance without excessive pre-turning
 
     # ─── Motion Limits ────────────────────────────────────────────────────────
-    max_linear_vel:  0.14     # m/s (safer default in obstacle-heavy worlds)
+    max_linear_vel:  0.20     # m/s for practical waypoint completion time
     max_angular_vel: 2.2      # rad/s
     lpf_alpha: 0.4            # Velocity low-pass smoothing factor
     waypoint_arrival_radius: 1.2
     stop_on_goal_reached: true
 
     # ─── Adaptive Control Bounds ──────────────────────────────────────────────
-    k_sep: 0.7
-    min_sep_w: 1.0
-    max_sep_w: 3.4
-    alpha_coh: 0.3
-    min_coh_w: 0.6
-    max_coh_w: 2.4
-    ideal_separation: 1.0
-    threshold_spread: 1.2
+    k_sep: 0.45
+    min_sep_w: 0.8
+    max_sep_w: 2.2
+    alpha_coh: 0.35
+    min_coh_w: 0.8
+    max_coh_w: 2.8
+    ideal_separation: 0.8
+    threshold_spread: 1.0
     min_obs_w: 1.2
-    max_obs_w: 6.0
+    max_obs_w: 5.5
     laser_epsilon: 0.01
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────

@@ -534,11 +534,18 @@ class BoidNode(Node):
                 min_laser_dist = min(valid_ranges)
                 safe_dist = max(min_laser_dist, self.laser_eps)
                 proximity = clamp((self.obs_thresh - safe_dist) / max(self.obs_thresh, self.laser_eps), 0.0, 1.0)
-                eff_w_mig = self.w_mig * (1.0 - 0.9 * proximity)
-                eff_w_ali = self.w_ali * (1.0 + 0.5 * proximity)
-                eff_w_coh = clamp(eff_w_coh * (1.0 + 0.3 * proximity), self.min_coh_w, self.max_coh_w)
+                # Keep a migration floor near obstacles to avoid stall/spin lock.
+                eff_w_mig = self.w_mig * (1.0 - 0.55 * proximity)
+                eff_w_ali = self.w_ali * (1.0 + 0.35 * proximity)
+                eff_w_coh = clamp(eff_w_coh * (1.0 + 0.45 * proximity), self.min_coh_w, self.max_coh_w)
                 scale = min(self.max_obs_w / self.w_obs if self.w_obs > 0 else 1.0, self.obs_thresh / safe_dist)
                 eff_w_obs = clamp(self.w_obs * scale, self.min_obs_w, self.max_obs_w)
+
+        # When far from the active waypoint, increase migration pull to sustain progress.
+        if self.current_wp < len(self.waypoints):
+            gx, gy = self.waypoints[self.current_wp]
+            wp_dist = math.hypot(gx - my_x, gy - my_y)
+            eff_w_mig *= clamp(wp_dist / 6.0, 1.0, 1.8)
 
         # ----------------------------------------------------------------
         # Step 4: Weighted sum
