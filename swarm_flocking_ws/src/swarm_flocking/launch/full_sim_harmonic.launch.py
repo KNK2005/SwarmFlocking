@@ -243,76 +243,76 @@ def _spawn_all_harmonic(context, *args, **kwargs):
       col = i % spawn_cols
       x = start_x + col * spacing_x
       y = start_y + row * spacing_y
-        ns = f'robot_{i}'
+      ns = f'robot_{i}'
 
-        sdf_path = os.path.join(tmp_dir, f'{ns}.sdf')
-        with open(sdf_path, 'w', encoding='utf-8') as f:
-            f.write(_harmonic_robot_sdf(ns))
+      sdf_path = os.path.join(tmp_dir, f'{ns}.sdf')
+      with open(sdf_path, 'w', encoding='utf-8') as f:
+        f.write(_harmonic_robot_sdf(ns))
 
-        spawn_time = WORLD_READY_DELAY + i * SPAWN_INTERVAL
-        boid_time = spawn_time + BOID_DELAY_AFTER_SPAWN
+      spawn_time = WORLD_READY_DELAY + i * SPAWN_INTERVAL
+      boid_time = spawn_time + BOID_DELAY_AFTER_SPAWN
 
-        spawn_action = TimerAction(
-            period=float(spawn_time),
-            actions=[
-                RosNode(
-                    package='ros_gz_sim',
-                    executable='create',
-                    arguments=[
-                        '-name', ns,
-                        '-allow_renaming', 'false',
-                        '-x', str(x),
-                        '-y', str(y),
-                        '-z', '0.0',
-                        '-file', sdf_path,
-                    ],
-                    output='screen',
-                ),
+      spawn_action = TimerAction(
+        period=float(spawn_time),
+        actions=[
+          RosNode(
+            package='ros_gz_sim',
+            executable='create',
+            arguments=[
+              '-name', ns,
+              '-allow_renaming', 'false',
+              '-x', str(x),
+              '-y', str(y),
+              '-z', '0.0',
+              '-file', sdf_path,
             ],
-        )
+            output='screen',
+          ),
+        ],
+      )
 
-        boid_action = TimerAction(
-            period=float(boid_time),
-            actions=[
-            RosNode(
-              package='swarm_flocking',
-              executable='boid_node',
-              name=f'boid_{i}',
-              namespace=ns,
-              parameters=[
-                params_file,
-                {
-                  'robot_id': i,
-                  'num_robots': num_robots,
-                  'spawn_x': x,
-                  'spawn_y': y,
-                  'odom_is_local': odom_is_local,
-                  'auto_detect_odom_frame': True,
-                  'use_monitor_waypoint': True,
-                  'enable_obstacle_avoidance': enable_obstacle_avoidance,
-                  'waypoints': waypoints,
-                  'use_sim_time': use_sim_time == 'true',
-                  'bottleneck_mode_enable': enable_obstacle_avoidance,
-                  'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
-                  'waypoint_sync_fraction': 0.15 if not enable_obstacle_avoidance else 0.30,
-                  'w_separation': 0.45 if not enable_obstacle_avoidance else 1.0,
-                  'w_alignment': 1.9 if not enable_obstacle_avoidance else 1.4,
-                  'w_cohesion': 2.4 if not enable_obstacle_avoidance else 1.6,
-                  'w_migration': 1.15 if not enable_obstacle_avoidance else 0.68,
-                  'sync_position_gain': 2.1 if not enable_obstacle_avoidance else 1.15,
-                  'sync_velocity_gain': 0.75 if not enable_obstacle_avoidance else 0.5,
-                  'sync_max_w': 3.0 if not enable_obstacle_avoidance else 2.0,
-                  'progress_timeout_s': 8.0 if not enable_obstacle_avoidance else 5.0,
-                  'regroup_gain': 1.2 if not enable_obstacle_avoidance else 0.8,
-                  'max_regroup_w': 2.8 if not enable_obstacle_avoidance else 2.0,
-                },
-              ],
-              output='screen',
-            ),
+      boid_action = TimerAction(
+        period=float(boid_time),
+        actions=[
+          RosNode(
+            package='swarm_flocking',
+            executable='boid_node',
+            name=f'boid_{i}',
+            namespace=ns,
+            parameters=[
+              params_file,
+              {
+                'robot_id': i,
+                'num_robots': num_robots,
+                'spawn_x': x,
+                'spawn_y': y,
+                'odom_is_local': odom_is_local,
+                'auto_detect_odom_frame': True,
+                'use_monitor_waypoint': True,
+                'enable_obstacle_avoidance': enable_obstacle_avoidance,
+                'waypoints': waypoints,
+                'use_sim_time': use_sim_time == 'true',
+                'bottleneck_mode_enable': enable_obstacle_avoidance,
+                'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
+                'waypoint_sync_fraction': 0.15 if not enable_obstacle_avoidance else 0.30,
+                'w_separation': 0.45 if not enable_obstacle_avoidance else 1.0,
+                'w_alignment': 1.9 if not enable_obstacle_avoidance else 1.4,
+                'w_cohesion': 2.4 if not enable_obstacle_avoidance else 1.6,
+                'w_migration': 1.15 if not enable_obstacle_avoidance else 0.68,
+                'sync_position_gain': 2.1 if not enable_obstacle_avoidance else 1.15,
+                'sync_velocity_gain': 0.75 if not enable_obstacle_avoidance else 0.5,
+                'sync_max_w': 3.0 if not enable_obstacle_avoidance else 2.0,
+                'progress_timeout_s': 8.0 if not enable_obstacle_avoidance else 5.0,
+                'regroup_gain': 1.2 if not enable_obstacle_avoidance else 0.8,
+                'max_regroup_w': 2.8 if not enable_obstacle_avoidance else 2.0,
+              },
             ],
-        )
+            output='screen',
+          ),
+        ],
+      )
 
-        actions.extend([spawn_action, boid_action])
+      actions.extend([spawn_action, boid_action])
 
     monitor = RosNode(
         package='swarm_flocking',
