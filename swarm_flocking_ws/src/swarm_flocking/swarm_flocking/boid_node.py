@@ -275,6 +275,19 @@ class BoidNode(Node):
         self.declare_parameter('goal_projection_obs_relax', 0.85)
         self.declare_parameter('waypoint_sync_fraction', 0.35)
         self.declare_parameter('waypoint_sync_radius_scale', 1.6)
+        self.declare_parameter('sync_enable', True)
+        self.declare_parameter('sync_leader_id', 0)
+        self.declare_parameter('sync_columns', 3)
+        self.declare_parameter('sync_spacing_x', 0.8)
+        self.declare_parameter('sync_spacing_y', 0.55)
+        self.declare_parameter('sync_position_gain', 1.4)
+        self.declare_parameter('sync_velocity_gain', 0.5)
+        self.declare_parameter('sync_max_w', 2.2)
+        self.declare_parameter('sync_obstacle_relax', 0.9)
+        self.declare_parameter('neighbour_front_angle_deg', 20.0)
+        self.declare_parameter('neighbour_as_obstacle_distance', 1.3)
+        self.declare_parameter('neighbour_scan_match_tol', 0.22)
+        self.declare_parameter('neighbour_obstacle_scale', 0.2)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -340,6 +353,19 @@ class BoidNode(Node):
         self.goal_proj_obs_relax = float(self.get_parameter('goal_projection_obs_relax').value)
         self.wp_sync_fraction = float(self.get_parameter('waypoint_sync_fraction').value)
         self.wp_sync_radius_scale = float(self.get_parameter('waypoint_sync_radius_scale').value)
+        self.sync_enable = bool(self.get_parameter('sync_enable').value)
+        self.sync_leader_id = int(self.get_parameter('sync_leader_id').value)
+        self.sync_columns = max(1, int(self.get_parameter('sync_columns').value))
+        self.sync_spacing_x = float(self.get_parameter('sync_spacing_x').value)
+        self.sync_spacing_y = float(self.get_parameter('sync_spacing_y').value)
+        self.sync_position_gain = float(self.get_parameter('sync_position_gain').value)
+        self.sync_velocity_gain = float(self.get_parameter('sync_velocity_gain').value)
+        self.sync_max_w = float(self.get_parameter('sync_max_w').value)
+        self.sync_obstacle_relax = float(self.get_parameter('sync_obstacle_relax').value)
+        self.neighbour_front_angle_deg = float(self.get_parameter('neighbour_front_angle_deg').value)
+        self.neighbour_as_obstacle_dist = float(self.get_parameter('neighbour_as_obstacle_distance').value)
+        self.neighbour_scan_match_tol = float(self.get_parameter('neighbour_scan_match_tol').value)
+        self.neighbour_obstacle_scale = float(self.get_parameter('neighbour_obstacle_scale').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -451,6 +477,32 @@ class BoidNode(Node):
                     self.wp_sync_fraction = clamp(float(value), 0.0, 1.0)
                 elif name == 'waypoint_sync_radius_scale':
                     self.wp_sync_radius_scale = max(1.0, float(value))
+                elif name == 'sync_enable':
+                    self.sync_enable = bool(value)
+                elif name == 'sync_leader_id':
+                    self.sync_leader_id = int(value)
+                elif name == 'sync_columns':
+                    self.sync_columns = max(1, int(value))
+                elif name == 'sync_spacing_x':
+                    self.sync_spacing_x = max(0.05, float(value))
+                elif name == 'sync_spacing_y':
+                    self.sync_spacing_y = max(0.05, float(value))
+                elif name == 'sync_position_gain':
+                    self.sync_position_gain = max(0.0, float(value))
+                elif name == 'sync_velocity_gain':
+                    self.sync_velocity_gain = max(0.0, float(value))
+                elif name == 'sync_max_w':
+                    self.sync_max_w = max(0.0, float(value))
+                elif name == 'sync_obstacle_relax':
+                    self.sync_obstacle_relax = max(0.0, float(value))
+                elif name == 'neighbour_front_angle_deg':
+                    self.neighbour_front_angle_deg = clamp(float(value), 1.0, 90.0)
+                elif name == 'neighbour_as_obstacle_distance':
+                    self.neighbour_as_obstacle_dist = max(0.1, float(value))
+                elif name == 'neighbour_scan_match_tol':
+                    self.neighbour_scan_match_tol = max(0.01, float(value))
+                elif name == 'neighbour_obstacle_scale':
+                    self.neighbour_obstacle_scale = clamp(float(value), 0.0, 1.0)
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -595,6 +647,14 @@ class BoidNode(Node):
 
         # Step 1: collect valid, non-stale neighbours
         neighbours = self._get_valid_neighbours(my_x, my_y)
+        front_min = self._get_front_min_distance()
+        nearest_front_nei = self._nearest_front_neighbour_distance(my_x, my_y, my_theta, neighbours)
+        front_is_neighbour = (
+            math.isfinite(front_min) and
+            math.isfinite(nearest_front_nei) and
+            nearest_front_nei <= self.neighbour_as_obstacle_dist and
+            abs(front_min - nearest_front_nei) <= self.neighbour_scan_match_tol
+        )
 
         # Step 2: compute each force component (all return unit vectors)
         f_sep = compute_separation(my_x, my_y, neighbours, self.sep_r)
@@ -616,6 +676,8 @@ class BoidNode(Node):
         f_regroup = (0.0, 0.0)
         wall_follow_w = 0.0
         f_wall = (0.0, 0.0)
+        sync_w = 0.0
+        f_sync = (0.0, 0.0)
         obstacle_proximity = 0.0
         wp_dist = 0.0
 
@@ -659,7 +721,10 @@ class BoidNode(Node):
                 eff_w_coh = clamp(eff_w_coh * (1.0 + 0.45 * proximity), self.min_coh_w, self.max_coh_w)
                 scale = min(self.max_obs_w / self.w_obs if self.w_obs > 0 else 1.0, self.obs_thresh / safe_dist)
                 eff_w_obs = clamp(self.w_obs * scale, self.min_obs_w, self.max_obs_w)
-                if safe_dist <= self.front_stop_dist:
+                if front_is_neighbour:
+                    eff_w_obs *= self.neighbour_obstacle_scale
+                    obstacle_proximity *= self.neighbour_obstacle_scale
+                if safe_dist <= self.front_stop_dist and not front_is_neighbour:
                     eff_w_obs = self.max_obs_w
 
                 # Tangential wall-following: choose side that best aligns with goal direction.
@@ -685,6 +750,11 @@ class BoidNode(Node):
             wp_dist = math.hypot(gx - my_x, gy - my_y)
             eff_w_mig *= clamp(wp_dist / 6.0, 1.0, 1.8)
 
+        # Synchronize relative positions/velocity around leader unless obstacle pressure is high.
+        f_sync, sync_w = self._compute_sync_force(
+            my_x, my_y, my_theta, my_vx, my_vy, obstacle_proximity
+        )
+
         # ----------------------------------------------------------------
         # Step 4: Weighted sum
         # ----------------------------------------------------------------
@@ -694,7 +764,8 @@ class BoidNode(Node):
               eff_w_obs * f_obs[0] +
               eff_w_mig * f_mig[0] +
               regroup_w * f_regroup[0] +
-              wall_follow_w * f_wall[0])
+              wall_follow_w * f_wall[0] +
+              sync_w * f_sync[0])
 
         fy = (eff_w_sep * f_sep[1] +
               eff_w_ali * f_ali[1] +
@@ -702,7 +773,8 @@ class BoidNode(Node):
               eff_w_obs * f_obs[1] +
               eff_w_mig * f_mig[1] +
               regroup_w * f_regroup[1] +
-              wall_follow_w * f_wall[1])
+              wall_follow_w * f_wall[1] +
+              sync_w * f_sync[1])
 
         # Enforce a minimum net component toward waypoint direction.
         if self.current_wp < len(self.waypoints) and (f_mig[0] != 0.0 or f_mig[1] != 0.0):
@@ -726,13 +798,12 @@ class BoidNode(Node):
                     (1.0 - self.lpf_alpha) * self._smooth_ang)
 
         # Step 6: clamp and publish
-        front_min = self._get_front_min_distance()
         front_speed_scale = self._compute_front_speed_scale(front_min)
         lin_cmd = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
         ang_cmd = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
 
         # Hard safety near walls: stop forward motion and force turn toward freer side.
-        if math.isfinite(front_min) and front_min <= self.front_stop_dist:
+        if math.isfinite(front_min) and front_min <= self.front_stop_dist and not front_is_neighbour:
             lin_cmd = min(0.0, lin_cmd)
             turn_dir = self._compute_escape_turn_direction()
             desired_escape = turn_dir * self.escape_turn_rate
@@ -850,6 +921,86 @@ class BoidNode(Node):
             if math.hypot(np.x - gx, np.y - gy) <= radius:
                 count += 1
         return count
+
+    def _normalize_vec(self, x: float, y: float) -> Tuple[float, float]:
+        """Safely normalize a 2-D vector."""
+        mag = math.hypot(x, y)
+        if mag < 1e-6:
+            return (0.0, 0.0)
+        return (x / mag, y / mag)
+
+    def _formation_slot_offset(self, robot_id: int) -> Tuple[float, float]:
+        """Desired local-frame slot offset (x forward, y left) behind the leader."""
+        if robot_id == self.sync_leader_id:
+            return (0.0, 0.0)
+        seq = robot_id if robot_id < self.sync_leader_id else (robot_id - 1)
+        row = (seq // self.sync_columns) + 1
+        col = seq % self.sync_columns
+        y_center = 0.5 * (self.sync_columns - 1)
+        local_x = -row * self.sync_spacing_x
+        local_y = (col - y_center) * self.sync_spacing_y
+        return (local_x, local_y)
+
+    def _compute_sync_force(
+        self,
+        my_x: float,
+        my_y: float,
+        my_theta: float,
+        my_vx: float,
+        my_vy: float,
+        obstacle_proximity: float,
+    ) -> Tuple[Tuple[float, float], float]:
+        """Compute leader-referenced sync force and effective weight."""
+        if not self.sync_enable or self.robot_id == self.sync_leader_id:
+            return ((0.0, 0.0), 0.0)
+
+        now = time.monotonic()
+        leader_pose = self.neighbour_poses.get(self.sync_leader_id)
+        if leader_pose is None or (now - leader_pose.timestamp) > STALE_TIMEOUT_S:
+            return ((0.0, 0.0), 0.0)
+
+        leader_vel = self.neighbour_vels.get(self.sync_leader_id)
+        if leader_vel is not None and (now - leader_vel.timestamp) <= STALE_TIMEOUT_S:
+            leader_vx, leader_vy = leader_vel.vx, leader_vel.vy
+        else:
+            leader_vx, leader_vy = 0.0, 0.0
+
+        local_x, local_y = self._formation_slot_offset(self.robot_id)
+        c = math.cos(leader_pose.theta)
+        s = math.sin(leader_pose.theta)
+        target_x = leader_pose.x + (c * local_x - s * local_y)
+        target_y = leader_pose.y + (s * local_x + c * local_y)
+
+        pos_fx, pos_fy = self._normalize_vec(target_x - my_x, target_y - my_y)
+        vel_fx, vel_fy = self._normalize_vec(leader_vx - my_vx, leader_vy - my_vy)
+        sync_fx, sync_fy = self._normalize_vec(
+            pos_fx + self.sync_velocity_gain * vel_fx,
+            pos_fy + self.sync_velocity_gain * vel_fy,
+        )
+        if sync_fx == 0.0 and sync_fy == 0.0:
+            return ((0.0, 0.0), 0.0)
+
+        obs_scale = clamp(1.0 - self.sync_obstacle_relax * obstacle_proximity, 0.25, 1.0)
+        sync_w = clamp(self.sync_position_gain * obs_scale, 0.0, self.sync_max_w)
+        return ((sync_fx, sync_fy), sync_w)
+
+    def _nearest_front_neighbour_distance(
+        self,
+        my_x: float,
+        my_y: float,
+        my_theta: float,
+        neighbours: list,
+    ) -> float:
+        """Nearest neighbour distance in a narrow front cone."""
+        half_angle = math.radians(self.neighbour_front_angle_deg)
+        nearest = float('inf')
+        for (_rid, nx, ny, _vx, _vy, dist) in neighbours:
+            bearing = math.atan2(ny - my_y, nx - my_x) - my_theta
+            # Wrap to [-pi, pi]
+            bearing = math.atan2(math.sin(bearing), math.cos(bearing))
+            if abs(bearing) <= half_angle:
+                nearest = min(nearest, dist)
+        return nearest
 
     def _get_front_min_distance(self) -> float:
         """Return minimum finite front-beam distance within configured FOV."""
