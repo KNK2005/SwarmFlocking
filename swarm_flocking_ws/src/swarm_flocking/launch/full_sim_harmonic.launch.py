@@ -132,6 +132,15 @@ def _spawn_all_harmonic(context, *args, **kwargs):
         ])
 
     actions = [
+      # RViz often uses map as fixed frame while Gazebo odom streams are in odom.
+      # Publish an identity transform so odom messages can be transformed to map.
+      RosNode(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='map_to_odom_tf_pub',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        output='screen',
+      ),
         RosNode(
             package='ros_gz_bridge',
             executable='parameter_bridge',
@@ -143,7 +152,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
 
     tmp_dir = tempfile.mkdtemp(prefix='swarm_harmonic_')
 
-    WORLD_READY_DELAY = 8.0
+    WORLD_READY_DELAY = 12.0
     SPAWN_INTERVAL = 1.2
     BOID_DELAY_AFTER_SPAWN = 2.5
 
@@ -169,7 +178,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                     executable='create',
                     arguments=[
                         '-name', ns,
-                        '-allow_renaming', 'false',
+                      '-allow_renaming', 'true',
                         '-x', str(x),
                         '-y', str(y),
                         '-z', '0.08',
@@ -227,7 +236,7 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
     """Create a compact differential-drive SDF with lidar and ROS-friendly topics."""
     return f"""<?xml version=\"1.0\"?>
 <sdf version=\"1.9\">
-  <model name=\"boid_bot\">
+  <model name=\"{robot_ns}\">
     <pose>0 0 0.08 0 0 0</pose>
     <static>false</static>
 
