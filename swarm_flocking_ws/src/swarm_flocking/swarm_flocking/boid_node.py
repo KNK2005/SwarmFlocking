@@ -159,6 +159,9 @@ class BoidNode(Node):
         self._last_progress_time: float = time.monotonic()
         self._desync_until: float = 0.0
         self._start_time: float = time.monotonic()
+        self._stall_wp: int = -1
+        self._stall_count: int = 0
+        self._last_desync_log_time: float = 0.0
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -299,6 +302,8 @@ class BoidNode(Node):
         self.declare_parameter('desync_duration_s', 2.0)
         self.declare_parameter('desync_sync_scale', 0.25)
         self.declare_parameter('desync_migration_boost', 1.4)
+        self.declare_parameter('stall_escalation_gain', 0.25)
+        self.declare_parameter('desync_log_cooldown_s', 12.0)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -384,6 +389,8 @@ class BoidNode(Node):
         self.desync_duration_s = float(self.get_parameter('desync_duration_s').value)
         self.desync_sync_scale = float(self.get_parameter('desync_sync_scale').value)
         self.desync_migration_boost = float(self.get_parameter('desync_migration_boost').value)
+        self.stall_escalation_gain = float(self.get_parameter('stall_escalation_gain').value)
+        self.desync_log_cooldown_s = float(self.get_parameter('desync_log_cooldown_s').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -535,6 +542,10 @@ class BoidNode(Node):
                     self.desync_sync_scale = clamp(float(value), 0.0, 1.0)
                 elif name == 'desync_migration_boost':
                     self.desync_migration_boost = max(1.0, float(value))
+                elif name == 'stall_escalation_gain':
+                    self.stall_escalation_gain = max(0.0, float(value))
+                elif name == 'desync_log_cooldown_s':
+                    self.desync_log_cooldown_s = max(0.0, float(value))
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -794,8 +805,11 @@ class BoidNode(Node):
             my_x, my_y, my_theta, my_vx, my_vy, obstacle_proximity
         )
         if now < self._desync_until:
-            sync_w *= self.desync_sync_scale
-            eff_w_mig *= self.desync_migration_boost
+            stall_level = min(4, self._stall_count)
+            sync_scale = self.desync_sync_scale / (1.0 + 0.2 * stall_level)
+            mig_boost = self.desync_migration_boost * (1.0 + self.stall_escalation_gain * stall_level)
+            sync_w *= clamp(sync_scale, 0.05, 1.0)
+            eff_w_mig *= mig_boost
 
         # ----------------------------------------------------------------
         # Step 4: Weighted sum
@@ -1049,6 +1063,8 @@ class BoidNode(Node):
         if self.current_wp >= len(self.waypoints):
             self._last_wp_dist = None
             self._desync_until = 0.0
+            self._stall_wp = -1
+            self._stall_count = 0
             return
 
         if self._last_wp_dist is None:
@@ -1059,19 +1075,31 @@ class BoidNode(Node):
         improvement = self._last_wp_dist - wp_dist
         if improvement >= self.progress_min_delta:
             self._last_progress_time = now
+            self._stall_count = max(0, self._stall_count - 1)
 
         if wp_dist < self._last_wp_dist:
             self._last_wp_dist = wp_dist
 
         if wp_dist <= (1.5 * self.wp_arrival_r):
             self._last_progress_time = now
+            self._stall_count = 0
             return
 
         if (now - self._last_progress_time) >= self.progress_timeout_s and now >= self._desync_until:
-            self._desync_until = now + self.desync_duration_s
+            if self.current_wp == self._stall_wp:
+                self._stall_count += 1
+            else:
+                self._stall_wp = self.current_wp
+                self._stall_count = 1
+
+            duration = self.desync_duration_s * (1.0 + 0.3 * min(self._stall_count, 4))
+            self._desync_until = now + duration
             self._last_progress_time = now
-            self.get_logger().info(
-                f'robot_{self.robot_id} desync assist: stalled at wp={self.current_wp}, dist={wp_dist:.2f}m')
+            if (now - self._last_desync_log_time) >= self.desync_log_cooldown_s:
+                self._last_desync_log_time = now
+                self.get_logger().info(
+                    f'robot_{self.robot_id} desync assist: stalled at wp={self.current_wp}, '
+                    f'dist={wp_dist:.2f}m, level={self._stall_count}')
 
     def _get_front_min_distance(self) -> float:
         """Return minimum finite front-beam distance within configured FOV."""

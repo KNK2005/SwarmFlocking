@@ -90,6 +90,8 @@
     desync_duration_s: 2.0
     desync_sync_scale: 0.25
     desync_migration_boost: 1.4
+    stall_escalation_gain: 0.25
+    desync_log_cooldown_s: 12.0
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0
