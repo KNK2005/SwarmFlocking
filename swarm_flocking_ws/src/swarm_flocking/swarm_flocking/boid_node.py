@@ -259,6 +259,8 @@ class BoidNode(Node):
         self.declare_parameter('front_fov_deg',      80.0)
         self.declare_parameter('front_stop_distance', 0.35)
         self.declare_parameter('escape_turn_rate',   2.0)
+        self.declare_parameter('wall_follow_gain',   1.1)
+        self.declare_parameter('wall_follow_max_w',  1.6)
         self.declare_parameter('goal_projection_min', 0.45)
         self.declare_parameter('goal_projection_gain', 1.2)
         self.declare_parameter('goal_projection_max_boost', 1.4)
@@ -317,6 +319,8 @@ class BoidNode(Node):
         self.front_fov_deg = float(self.get_parameter('front_fov_deg').value)
         self.front_stop_dist = float(self.get_parameter('front_stop_distance').value)
         self.escape_turn_rate = float(self.get_parameter('escape_turn_rate').value)
+        self.wall_follow_gain = float(self.get_parameter('wall_follow_gain').value)
+        self.wall_follow_max_w = float(self.get_parameter('wall_follow_max_w').value)
         self.goal_proj_min = float(self.get_parameter('goal_projection_min').value)
         self.goal_proj_gain = float(self.get_parameter('goal_projection_gain').value)
         self.goal_proj_max_boost = float(self.get_parameter('goal_projection_max_boost').value)
@@ -408,6 +412,10 @@ class BoidNode(Node):
                     self.front_stop_dist = max(0.05, float(value))
                 elif name == 'escape_turn_rate':
                     self.escape_turn_rate = max(0.1, float(value))
+                elif name == 'wall_follow_gain':
+                    self.wall_follow_gain = max(0.0, float(value))
+                elif name == 'wall_follow_max_w':
+                    self.wall_follow_max_w = max(0.0, float(value))
                 elif name == 'goal_projection_min':
                     self.goal_proj_min = max(0.0, float(value))
                 elif name == 'goal_projection_gain':
@@ -571,6 +579,8 @@ class BoidNode(Node):
         eff_w_mig = self.w_mig
         regroup_w = 0.0
         f_regroup = (0.0, 0.0)
+        wall_follow_w = 0.0
+        f_wall = (0.0, 0.0)
         obstacle_proximity = 0.0
         wp_dist = 0.0
 
@@ -617,6 +627,23 @@ class BoidNode(Node):
                 if safe_dist <= self.front_stop_dist:
                     eff_w_obs = self.max_obs_w
 
+                # Tangential wall-following: choose side that best aligns with goal direction.
+                obs_mag = math.hypot(f_obs[0], f_obs[1])
+                if obs_mag > 1e-6:
+                    t1 = (-f_obs[1], f_obs[0])
+                    t2 = (f_obs[1], -f_obs[0])
+                    if (f_mig[0] != 0.0) or (f_mig[1] != 0.0):
+                        dot1 = t1[0] * f_mig[0] + t1[1] * f_mig[1]
+                        dot2 = t2[0] * f_mig[0] + t2[1] * f_mig[1]
+                        tx, ty = t1 if dot1 >= dot2 else t2
+                    else:
+                        tx, ty = t1
+
+                    tmag = math.hypot(tx, ty)
+                    if tmag > 1e-6:
+                        f_wall = (tx / tmag, ty / tmag)
+                        wall_follow_w = clamp(self.wall_follow_gain * obstacle_proximity, 0.0, self.wall_follow_max_w)
+
         # When far from the active waypoint, increase migration pull to sustain progress.
         if self.current_wp < len(self.waypoints):
             gx, gy = self.waypoints[self.current_wp]
@@ -631,14 +658,16 @@ class BoidNode(Node):
               eff_w_coh * f_coh[0] +
               eff_w_obs * f_obs[0] +
               eff_w_mig * f_mig[0] +
-              regroup_w * f_regroup[0])
+              regroup_w * f_regroup[0] +
+              wall_follow_w * f_wall[0])
 
         fy = (eff_w_sep * f_sep[1] +
               eff_w_ali * f_ali[1] +
               eff_w_coh * f_coh[1] +
               eff_w_obs * f_obs[1] +
               eff_w_mig * f_mig[1] +
-              regroup_w * f_regroup[1])
+              regroup_w * f_regroup[1] +
+              wall_follow_w * f_wall[1])
 
         # Enforce a minimum net component toward waypoint direction.
         if self.current_wp < len(self.waypoints) and (f_mig[0] != 0.0 or f_mig[1] != 0.0):

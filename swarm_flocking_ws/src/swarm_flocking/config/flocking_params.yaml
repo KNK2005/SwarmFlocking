@@ -19,14 +19,14 @@
     # ─── Reynolds Force Weights ───────────────────────────────────────────────
     w_separation: 1.0     # Prevent collisions without over-dispersing at spawn
     w_alignment:  1.4     # Strong heading synchronization
-    w_cohesion:   1.9     # Keep flock compact through corridor turns
-    w_obstacle:   3.9     # Stronger obstacle avoidance in wall corridors
-    w_migration:  0.62    # Stronger waypoint pull for faster progress
+    w_cohesion:   1.6     # Keep flock compact without over-compressing at walls
+    w_obstacle:   3.2     # Strong obstacle avoidance without freezing at bottlenecks
+    w_migration:  0.68    # Stronger waypoint pull for faster progress
 
     # ─── Sensing Ranges (meters) ──────────────────────────────────────────────
     neighbor_radius:    4.5   # Improve group connectivity in larger spread
     separation_radius:  0.5   # Avoid strong initial repulsion at spawn spacing
-    obstacle_threshold: 1.0   # Earlier wall detection and response
+    obstacle_threshold: 0.9   # Early wall detection with less overreaction
 
     # ─── Motion Limits ────────────────────────────────────────────────────────
     max_linear_vel:  0.22     # m/s (faster traversal)
@@ -44,24 +44,26 @@
     max_coh_w: 3.2
     ideal_separation: 0.7
     threshold_spread: 0.9
-    min_obs_w: 1.4
-    max_obs_w: 6.8
+    min_obs_w: 1.2
+    max_obs_w: 5.8
     laser_epsilon: 0.01
 
     # ─── Regroup + Front-Obstacle Speed Control ─────────────────────────────
     regroup_spread_threshold: 1.4
-    regroup_gain: 1.0
+    regroup_gain: 0.8
     max_regroup_w: 2.0
-    front_slowdown_distance: 1.0
-    min_front_speed_scale: 0.12
+    front_slowdown_distance: 0.9
+    min_front_speed_scale: 0.20
     front_fov_deg: 80.0
-    front_stop_distance: 0.35
-    escape_turn_rate: 2.1
+    front_stop_distance: 0.28
+    escape_turn_rate: 2.3
+    wall_follow_gain: 1.1
+    wall_follow_max_w: 1.6
     goal_projection_min: 0.45
     goal_projection_gain: 1.2
     goal_projection_max_boost: 1.4
-    goal_projection_obs_relax: 0.7
-    waypoint_sync_fraction: 0.35
+    goal_projection_obs_relax: 0.85
+    waypoint_sync_fraction: 0.0
     waypoint_sync_radius_scale: 1.6
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
