@@ -250,6 +250,13 @@ class BoidNode(Node):
         self.declare_parameter('w_cohesion',         1.0)
         self.declare_parameter('w_obstacle',         2.5)
         self.declare_parameter('enable_obstacle_avoidance', True)
+        self.declare_parameter('coordinated_mode_enable', True)
+        self.declare_parameter('coordinated_desired_radius', 0.9)
+        self.declare_parameter('coordinated_w_group_migration', 2.2)
+        self.declare_parameter('coordinated_w_center', 3.0)
+        self.declare_parameter('coordinated_w_alignment', 1.4)
+        self.declare_parameter('coordinated_w_separation', 0.45)
+        self.declare_parameter('coordinated_w_self_migration', 0.9)
         self.declare_parameter('w_migration',        0.3)
         self.declare_parameter('neighbor_radius',    3.0)
         self.declare_parameter('separation_radius',  0.8)
@@ -358,6 +365,13 @@ class BoidNode(Node):
         self.w_coh     = float(self.get_parameter('w_cohesion').value)
         self.w_obs     = float(self.get_parameter('w_obstacle').value)
         self.enable_obstacle_avoidance = bool(self.get_parameter('enable_obstacle_avoidance').value)
+        self.coordinated_mode_enable = bool(self.get_parameter('coordinated_mode_enable').value)
+        self.coordinated_desired_radius = max(0.2, float(self.get_parameter('coordinated_desired_radius').value))
+        self.coordinated_w_group_migration = max(0.0, float(self.get_parameter('coordinated_w_group_migration').value))
+        self.coordinated_w_center = max(0.0, float(self.get_parameter('coordinated_w_center').value))
+        self.coordinated_w_alignment = max(0.0, float(self.get_parameter('coordinated_w_alignment').value))
+        self.coordinated_w_separation = max(0.0, float(self.get_parameter('coordinated_w_separation').value))
+        self.coordinated_w_self_migration = max(0.0, float(self.get_parameter('coordinated_w_self_migration').value))
         self.w_mig     = float(self.get_parameter('w_migration').value)
         self.neighbour_r  = float(self.get_parameter('neighbor_radius').value)
         self.sep_r        = float(self.get_parameter('separation_radius').value)
@@ -480,6 +494,20 @@ class BoidNode(Node):
                     self.w_obs = float(value)
                 elif name == 'enable_obstacle_avoidance':
                     self.enable_obstacle_avoidance = bool(value)
+                elif name == 'coordinated_mode_enable':
+                    self.coordinated_mode_enable = bool(value)
+                elif name == 'coordinated_desired_radius':
+                    self.coordinated_desired_radius = max(0.2, float(value))
+                elif name == 'coordinated_w_group_migration':
+                    self.coordinated_w_group_migration = max(0.0, float(value))
+                elif name == 'coordinated_w_center':
+                    self.coordinated_w_center = max(0.0, float(value))
+                elif name == 'coordinated_w_alignment':
+                    self.coordinated_w_alignment = max(0.0, float(value))
+                elif name == 'coordinated_w_separation':
+                    self.coordinated_w_separation = max(0.0, float(value))
+                elif name == 'coordinated_w_self_migration':
+                    self.coordinated_w_self_migration = max(0.0, float(value))
                 elif name == 'w_migration':
                     self.w_mig = float(value)
                 elif name == 'neighbor_radius':
@@ -811,6 +839,13 @@ class BoidNode(Node):
         my_vx, my_vy = self.my_vel
         now = time.monotonic()
         obstacle_avoidance_enabled = self.enable_obstacle_avoidance
+
+        # Dedicated open-field coordinated controller: keep flock compact while
+        # moving group centroid toward the active waypoint.
+        if (not obstacle_avoidance_enabled) and self.coordinated_mode_enable:
+            self._run_coordinated_open_field(my_x, my_y, my_theta, my_vx, my_vy)
+            return
+
         startup_phase = (now - self._start_time) < self.startup_relax_s
         in_bottleneck = self._in_bottleneck_zone(my_x, my_y)
 
@@ -1118,6 +1153,70 @@ class BoidNode(Node):
         self.cmd_pub.publish(cmd)
 
         # Step 7: advance waypoint when close enough
+        self._advance_waypoint(my_x, my_y)
+
+    def _run_coordinated_open_field(
+        self,
+        my_x: float,
+        my_y: float,
+        my_theta: float,
+        my_vx: float,
+        my_vy: float,
+    ) -> None:
+        """Compact-group controller used for no-obstacle coordinated runs."""
+        neighbours = self._get_valid_neighbours(my_x, my_y)
+        target_wp = self._get_active_waypoint_target()
+        if target_wp is None:
+            cmd = Twist()
+            self.cmd_pub.publish(cmd)
+            return
+
+        gx, gy = target_wp
+
+        points = [(my_x, my_y)] + [(n[1], n[2]) for n in neighbours]
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        spread = sum(math.hypot(px - cx, py - cy) for px, py in points) / len(points)
+
+        f_group = compute_migration(cx, cy, gx, gy)
+        f_self = compute_migration(my_x, my_y, gx, gy)
+        f_center = self._normalize_vec(cx - my_x, cy - my_y)
+        f_sep = compute_separation(my_x, my_y, neighbours, self.sep_r)
+        f_ali = compute_alignment(my_vx, my_vy, neighbours)
+
+        # If flock spread grows, prioritize regrouping and soften migration.
+        spread_ratio = max(0.0, (spread - self.coordinated_desired_radius) / max(0.2, self.coordinated_desired_radius))
+        regroup_boost = 1.0 + min(2.0, 1.8 * spread_ratio)
+        mig_scale = clamp(1.0 - 0.45 * min(1.0, spread_ratio), 0.45, 1.0)
+
+        fx = (
+            self.coordinated_w_group_migration * mig_scale * f_group[0] +
+            self.coordinated_w_self_migration * f_self[0] +
+            self.coordinated_w_center * regroup_boost * f_center[0] +
+            self.coordinated_w_alignment * f_ali[0] +
+            self.coordinated_w_separation * f_sep[0]
+        )
+        fy = (
+            self.coordinated_w_group_migration * mig_scale * f_group[1] +
+            self.coordinated_w_self_migration * f_self[1] +
+            self.coordinated_w_center * regroup_boost * f_center[1] +
+            self.coordinated_w_alignment * f_ali[1] +
+            self.coordinated_w_separation * f_sep[1]
+        )
+
+        lin, ang = force_to_cmd_vel(fx, fy, my_theta, self.max_lin, self.max_ang)
+        lin = max(0.0, lin)
+        self._smooth_lin = (self.lpf_alpha * lin + (1.0 - self.lpf_alpha) * self._smooth_lin)
+        self._smooth_ang = (self.lpf_alpha * ang + (1.0 - self.lpf_alpha) * self._smooth_ang)
+
+        cmd = Twist()
+        cmd.linear.x = clamp(self._smooth_lin, 0.0, self.max_lin)
+        cmd.angular.z = clamp(self._smooth_ang, -0.75 * self.max_ang, 0.75 * self.max_ang)
+        self.cmd_pub.publish(cmd)
+
+        self._desync_until = 0.0
+        self._stall_wp = -1
+        self._stall_count = 0
         self._advance_waypoint(my_x, my_y)
 
     # ====================================================================
