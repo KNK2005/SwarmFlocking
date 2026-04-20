@@ -117,7 +117,8 @@ def _dispatch_backend(context, *args, **kwargs):
                     launch_arguments={
                         'num_robots': context.launch_configurations.get('num_robots', '6'),
                         'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
-                        'use_sim_time': 'true',
+                        # Harmonic can run without bridged /clock; keep ROS timers alive.
+                        'use_sim_time': 'false',
                     }.items(),
                 ),
             ]

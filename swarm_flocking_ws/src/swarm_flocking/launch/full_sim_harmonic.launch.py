@@ -43,8 +43,9 @@ def generate_launch_description():
 
     num_robots_arg = DeclareLaunchArgument(
         'num_robots', default_value='6', description='Number of robots to spawn')
+    # Default false for robustness: if /clock is missing, ROS-time timers stall.
     use_sim_time_arg = DeclareLaunchArgument(
-        'use_sim_time', default_value='true', description='Use simulation clock')
+      'use_sim_time', default_value='false', description='Use simulation clock')
     world_name_arg = DeclareLaunchArgument(
         'world_name', default_value='obstacle_course', description='World basename from swarm_flocking_gazebo/worlds')
 
@@ -115,7 +116,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     params_file = os.path.join(pkg_flocking, 'config', 'flocking_params.yaml')
 
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
-    use_sim_time = context.launch_configurations.get('use_sim_time', 'true')
+    use_sim_time = context.launch_configurations.get('use_sim_time', 'false')
     start_x, start_y = 2.0, 4.5
     spacing = 0.7
 
@@ -138,17 +139,37 @@ def _spawn_all_harmonic(context, *args, **kwargs):
       ),
     ]
 
-    # Use one bridge process per robot to keep command and telemetry routing isolated.
+    # Use separate bridge processes per topic so one failure does not block others.
     for i in range(num_robots):
       ns = f'robot_{i}'
       actions.append(
         RosNode(
           package='ros_gz_bridge',
           executable='parameter_bridge',
-          name=f'ros_gz_bridge_{ns}',
+          name=f'ros_gz_bridge_{ns}_cmd',
           arguments=[
             f'/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+          ],
+          output='screen',
+        )
+      )
+      actions.append(
+        RosNode(
+          package='ros_gz_bridge',
+          executable='parameter_bridge',
+          name=f'ros_gz_bridge_{ns}_odom',
+          arguments=[
             f'/{ns}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+          ],
+          output='screen',
+        )
+      )
+      actions.append(
+        RosNode(
+          package='ros_gz_bridge',
+          executable='parameter_bridge',
+          name=f'ros_gz_bridge_{ns}_scan',
+          arguments=[
             f'/{ns}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
           ],
           output='screen',

@@ -151,6 +151,7 @@ class BoidNode(Node):
         # Smoothed output velocities (low-pass filter state)
         self._smooth_lin: float = 0.0
         self._smooth_ang: float = 0.0
+        self._last_no_odom_warn: float = 0.0
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -473,7 +474,13 @@ class BoidNode(Node):
     def _flocking_loop(self) -> None:
         """Compute and publish a velocity command every 0.1 s."""
         if self.my_pose is None:
-            # No odometry yet — hold still
+            # No odometry yet — hold still and emit periodic diagnostics.
+            now = time.monotonic()
+            if now - self._last_no_odom_warn > 5.0:
+                self._last_no_odom_warn = now
+                self.get_logger().warn(
+                    f'No odom received yet on /robot_{self.robot_id}/odom; holding position.'
+                )
             return
 
         # End-state behavior: once all waypoints are done, hold zero velocity.
