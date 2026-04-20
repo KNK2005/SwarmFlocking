@@ -56,6 +56,9 @@ def generate_launch_description():
             'spawn_columns', default_value='3',
             description='Spawn grid columns used by Harmonic backend'),
         DeclareLaunchArgument(
+            'spawn_yaw', default_value='0.25',
+            description='Initial yaw (rad) for robots in Harmonic backend'),
+        DeclareLaunchArgument(
             'dt', default_value='0.1',
             description='Physics timestep for headless backend'),
         DeclareLaunchArgument(
@@ -153,6 +156,7 @@ def _dispatch_backend(context, *args, **kwargs):
                         'spawn_spacing_x': context.launch_configurations.get('spawn_spacing_x', '1.0'),
                         'spawn_spacing_y': context.launch_configurations.get('spawn_spacing_y', '1.0'),
                         'spawn_columns': context.launch_configurations.get('spawn_columns', '3'),
+                        'spawn_yaw': context.launch_configurations.get('spawn_yaw', '0.25'),
                     }.items(),
                 ),
             ]

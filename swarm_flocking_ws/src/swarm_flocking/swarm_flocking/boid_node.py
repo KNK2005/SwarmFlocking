@@ -987,7 +987,12 @@ class BoidNode(Node):
 
         # Detect local progress stalls and temporarily relax sync to unblock.
         speed_mag = math.hypot(my_vx, my_vy)
-        self._update_progress_state(wp_dist, now, speed_mag, front_min, front_is_neighbour)
+        if obstacle_avoidance_enabled:
+            self._update_progress_state(wp_dist, now, speed_mag, front_min, front_is_neighbour)
+        else:
+            self._desync_until = 0.0
+            self._stall_wp = -1
+            self._stall_count = 0
 
         # Synchronize relative positions/velocity around leader unless obstacle pressure is high.
         f_sync, sync_w = self._compute_sync_force(

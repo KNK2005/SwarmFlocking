@@ -68,6 +68,8 @@ def generate_launch_description():
       'spawn_spacing_y', default_value='1.0', description='Spawn grid spacing along Y')
     spawn_columns_arg = DeclareLaunchArgument(
       'spawn_columns', default_value='3', description='Spawn grid column count')
+    spawn_yaw_arg = DeclareLaunchArgument(
+      'spawn_yaw', default_value='0.25', description='Initial yaw (rad) for spawned robots')
     headless_arg = DeclareLaunchArgument(
       'headless', default_value='true', description='Run Gazebo server only (no GUI window)')
     enable_rviz_arg = DeclareLaunchArgument(
@@ -137,6 +139,7 @@ def generate_launch_description():
         spawn_spacing_x_arg,
         spawn_spacing_y_arg,
         spawn_columns_arg,
+        spawn_yaw_arg,
         headless_arg,
         enable_rviz_arg,
         enable_obstacle_avoidance_arg,
@@ -167,7 +170,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
 
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
     use_sim_time = context.launch_configurations.get('use_sim_time', 'false')
-    odom_is_local = context.launch_configurations.get('odom_is_local', 'true').lower() == 'true'
+    odom_is_local = context.launch_configurations.get('odom_is_local', 'false').lower() == 'true'
     enable_obstacle_avoidance = context.launch_configurations.get('enable_obstacle_avoidance', 'false').lower() == 'true'
     waypoints = _parse_float_list(context.launch_configurations.get('waypoints', ''))
     start_x = float(context.launch_configurations.get('spawn_origin_x', '4.0'))
@@ -175,6 +178,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     spacing_x = float(context.launch_configurations.get('spawn_spacing_x', '1.0'))
     spacing_y = float(context.launch_configurations.get('spawn_spacing_y', '1.0'))
     spawn_cols = max(1, int(context.launch_configurations.get('spawn_columns', '3')))
+    spawn_yaw = float(context.launch_configurations.get('spawn_yaw', '0.25'))
 
     actions = [
       # RViz often uses map as fixed frame while Gazebo odom streams are in odom.
@@ -206,6 +210,8 @@ def _spawn_all_harmonic(context, *args, **kwargs):
           arguments=[
             f'/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
           ],
+          respawn=True,
+          respawn_delay=1.0,
           output='screen',
         )
       )
@@ -217,6 +223,24 @@ def _spawn_all_harmonic(context, *args, **kwargs):
           arguments=[
             f'/{ns}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
           ],
+          respawn=True,
+          respawn_delay=1.0,
+          output='screen',
+        )
+      )
+      actions.append(
+        RosNode(
+          package='ros_gz_bridge',
+          executable='parameter_bridge',
+          name=f'ros_gz_bridge_{ns}_odom_model',
+          arguments=[
+            f'/model/{ns}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+          ],
+          remappings=[
+            (f'/model/{ns}/odometry', f'/{ns}/odom'),
+          ],
+          respawn=True,
+          respawn_delay=1.0,
           output='screen',
         )
       )
@@ -228,6 +252,8 @@ def _spawn_all_harmonic(context, *args, **kwargs):
           arguments=[
             f'/{ns}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
           ],
+          respawn=True,
+          respawn_delay=1.0,
           output='screen',
         )
       )
@@ -264,6 +290,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
               '-x', str(x),
               '-y', str(y),
               '-z', '0.0',
+              '-Y', str(spawn_yaw),
               '-file', sdf_path,
             ],
             output='screen',
@@ -294,17 +321,23 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                 'use_sim_time': use_sim_time == 'true',
                 'bottleneck_mode_enable': enable_obstacle_avoidance,
                 'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
-                'waypoint_sync_fraction': 0.15 if not enable_obstacle_avoidance else 0.30,
-                'w_separation': 0.45 if not enable_obstacle_avoidance else 1.0,
-                'w_alignment': 1.9 if not enable_obstacle_avoidance else 1.4,
-                'w_cohesion': 2.4 if not enable_obstacle_avoidance else 1.6,
-                'w_migration': 1.15 if not enable_obstacle_avoidance else 0.68,
-                'sync_position_gain': 2.1 if not enable_obstacle_avoidance else 1.15,
-                'sync_velocity_gain': 0.75 if not enable_obstacle_avoidance else 0.5,
-                'sync_max_w': 3.0 if not enable_obstacle_avoidance else 2.0,
-                'progress_timeout_s': 8.0 if not enable_obstacle_avoidance else 5.0,
-                'regroup_gain': 1.2 if not enable_obstacle_avoidance else 0.8,
-                'max_regroup_w': 2.8 if not enable_obstacle_avoidance else 2.0,
+                'waypoint_sync_fraction': 0.05 if not enable_obstacle_avoidance else 0.30,
+                'w_separation': 0.30 if not enable_obstacle_avoidance else 1.0,
+                'w_alignment': 2.2 if not enable_obstacle_avoidance else 1.4,
+                'w_cohesion': 3.0 if not enable_obstacle_avoidance else 1.6,
+                'w_migration': 1.35 if not enable_obstacle_avoidance else 0.68,
+                'sync_position_gain': 2.6 if not enable_obstacle_avoidance else 1.15,
+                'sync_velocity_gain': 0.90 if not enable_obstacle_avoidance else 0.5,
+                'sync_max_w': 3.4 if not enable_obstacle_avoidance else 2.0,
+                'progress_timeout_s': 20.0 if not enable_obstacle_avoidance else 5.0,
+                'desync_duration_s': 0.5 if not enable_obstacle_avoidance else 2.0,
+                'desync_sync_scale': 0.9 if not enable_obstacle_avoidance else 0.25,
+                'desync_migration_boost': 1.05 if not enable_obstacle_avoidance else 1.4,
+                'stall_escalation_gain': 0.0 if not enable_obstacle_avoidance else 0.25,
+                'regroup_gain': 1.4 if not enable_obstacle_avoidance else 0.8,
+                'max_regroup_w': 3.2 if not enable_obstacle_avoidance else 2.0,
+                'sync_spacing_x': spacing_x,
+                'sync_spacing_y': spacing_y,
               },
             ],
             output='screen',
@@ -325,10 +358,10 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                 'waypoints': waypoints,
                 'use_sim_time': use_sim_time == 'true',
               'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
-              'waypoint_reach_fraction': 0.50 if not enable_obstacle_avoidance else 0.60,
-              'waypoint_reach_radius': 1.9 if not enable_obstacle_avoidance else 1.5,
-              'goal_tolerance': 1.6 if not enable_obstacle_avoidance else 1.2,
-              'timeout_progress_grace_s': 300.0 if not enable_obstacle_avoidance else 240.0,
+              'waypoint_reach_fraction': 0.40 if not enable_obstacle_avoidance else 0.60,
+              'waypoint_reach_radius': 2.2 if not enable_obstacle_avoidance else 1.5,
+              'goal_tolerance': 1.8 if not enable_obstacle_avoidance else 1.2,
+              'timeout_progress_grace_s': 360.0 if not enable_obstacle_avoidance else 240.0,
             },
         ],
         output='screen',
