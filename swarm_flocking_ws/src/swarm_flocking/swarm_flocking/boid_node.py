@@ -291,6 +291,19 @@ class BoidNode(Node):
         self.declare_parameter('sync_velocity_gain', 0.5)
         self.declare_parameter('sync_max_w', 2.2)
         self.declare_parameter('sync_obstacle_relax', 0.9)
+        self.declare_parameter('sync_error_boost_gain', 0.6)
+        self.declare_parameter('sync_error_boost_max', 1.8)
+        self.declare_parameter('bottleneck_mode_enable', True)
+        self.declare_parameter('bottleneck_center_x', 8.5)
+        self.declare_parameter('bottleneck_center_y', 7.5)
+        self.declare_parameter('bottleneck_zone_half_x', 3.2)
+        self.declare_parameter('bottleneck_zone_half_y', 4.0)
+        self.declare_parameter('bottleneck_sync_columns', 1)
+        self.declare_parameter('bottleneck_sync_spacing_x', 0.65)
+        self.declare_parameter('bottleneck_sync_spacing_y', 0.18)
+        self.declare_parameter('bottleneck_sync_gain_mult', 1.8)
+        self.declare_parameter('bottleneck_sep_scale', 0.75)
+        self.declare_parameter('bottleneck_migration_boost', 1.15)
         self.declare_parameter('neighbour_front_angle_deg', 20.0)
         self.declare_parameter('neighbour_as_obstacle_distance', 1.3)
         self.declare_parameter('neighbour_body_clearance', 0.30)
@@ -378,6 +391,19 @@ class BoidNode(Node):
         self.sync_velocity_gain = float(self.get_parameter('sync_velocity_gain').value)
         self.sync_max_w = float(self.get_parameter('sync_max_w').value)
         self.sync_obstacle_relax = float(self.get_parameter('sync_obstacle_relax').value)
+        self.sync_error_boost_gain = float(self.get_parameter('sync_error_boost_gain').value)
+        self.sync_error_boost_max = float(self.get_parameter('sync_error_boost_max').value)
+        self.bottleneck_mode_enable = bool(self.get_parameter('bottleneck_mode_enable').value)
+        self.bneck_cx = float(self.get_parameter('bottleneck_center_x').value)
+        self.bneck_cy = float(self.get_parameter('bottleneck_center_y').value)
+        self.bneck_half_x = float(self.get_parameter('bottleneck_zone_half_x').value)
+        self.bneck_half_y = float(self.get_parameter('bottleneck_zone_half_y').value)
+        self.bneck_sync_columns = max(1, int(self.get_parameter('bottleneck_sync_columns').value))
+        self.bneck_sync_spacing_x = float(self.get_parameter('bottleneck_sync_spacing_x').value)
+        self.bneck_sync_spacing_y = float(self.get_parameter('bottleneck_sync_spacing_y').value)
+        self.bneck_sync_gain_mult = float(self.get_parameter('bottleneck_sync_gain_mult').value)
+        self.bneck_sep_scale = float(self.get_parameter('bottleneck_sep_scale').value)
+        self.bneck_mig_boost = float(self.get_parameter('bottleneck_migration_boost').value)
         self.neighbour_front_angle_deg = float(self.get_parameter('neighbour_front_angle_deg').value)
         self.neighbour_as_obstacle_dist = float(self.get_parameter('neighbour_as_obstacle_distance').value)
         self.neighbour_body_clearance = float(self.get_parameter('neighbour_body_clearance').value)
@@ -520,6 +546,32 @@ class BoidNode(Node):
                     self.sync_max_w = max(0.0, float(value))
                 elif name == 'sync_obstacle_relax':
                     self.sync_obstacle_relax = max(0.0, float(value))
+                elif name == 'sync_error_boost_gain':
+                    self.sync_error_boost_gain = max(0.0, float(value))
+                elif name == 'sync_error_boost_max':
+                    self.sync_error_boost_max = max(1.0, float(value))
+                elif name == 'bottleneck_mode_enable':
+                    self.bottleneck_mode_enable = bool(value)
+                elif name == 'bottleneck_center_x':
+                    self.bneck_cx = float(value)
+                elif name == 'bottleneck_center_y':
+                    self.bneck_cy = float(value)
+                elif name == 'bottleneck_zone_half_x':
+                    self.bneck_half_x = max(0.1, float(value))
+                elif name == 'bottleneck_zone_half_y':
+                    self.bneck_half_y = max(0.1, float(value))
+                elif name == 'bottleneck_sync_columns':
+                    self.bneck_sync_columns = max(1, int(value))
+                elif name == 'bottleneck_sync_spacing_x':
+                    self.bneck_sync_spacing_x = max(0.05, float(value))
+                elif name == 'bottleneck_sync_spacing_y':
+                    self.bneck_sync_spacing_y = max(0.0, float(value))
+                elif name == 'bottleneck_sync_gain_mult':
+                    self.bneck_sync_gain_mult = max(0.1, float(value))
+                elif name == 'bottleneck_sep_scale':
+                    self.bneck_sep_scale = clamp(float(value), 0.2, 1.5)
+                elif name == 'bottleneck_migration_boost':
+                    self.bneck_mig_boost = max(0.1, float(value))
                 elif name == 'neighbour_front_angle_deg':
                     self.neighbour_front_angle_deg = clamp(float(value), 1.0, 90.0)
                 elif name == 'neighbour_as_obstacle_distance':
@@ -677,6 +729,7 @@ class BoidNode(Node):
         my_vx, my_vy = self.my_vel
         now = time.monotonic()
         startup_phase = (now - self._start_time) < self.startup_relax_s
+        in_bottleneck = self._in_bottleneck_zone(my_x, my_y)
 
         # Timed recovery mode to break local minima near bottlenecks/walls.
         if now < self._recover_until:
@@ -797,12 +850,17 @@ class BoidNode(Node):
             wp_dist = math.hypot(gx - my_x, gy - my_y)
             eff_w_mig *= clamp(wp_dist / 6.0, 1.0, 1.8)
 
+        if in_bottleneck:
+            eff_w_sep *= self.bneck_sep_scale
+            eff_w_mig *= self.bneck_mig_boost
+            eff_w_coh = clamp(eff_w_coh * 1.15, self.min_coh_w, self.max_coh_w)
+
         # Detect local progress stalls and temporarily relax sync to unblock.
         self._update_progress_state(wp_dist, now)
 
         # Synchronize relative positions/velocity around leader unless obstacle pressure is high.
         f_sync, sync_w = self._compute_sync_force(
-            my_x, my_y, my_theta, my_vx, my_vy, obstacle_proximity
+            my_x, my_y, my_theta, my_vx, my_vy, obstacle_proximity, in_bottleneck
         )
         if now < self._desync_until:
             stall_level = min(4, self._stall_count)
@@ -985,17 +1043,33 @@ class BoidNode(Node):
             return (0.0, 0.0)
         return (x / mag, y / mag)
 
-    def _formation_slot_offset(self, robot_id: int) -> Tuple[float, float]:
+    def _formation_slot_offset(
+        self,
+        robot_id: int,
+        columns: Optional[int] = None,
+        spacing_x: Optional[float] = None,
+        spacing_y: Optional[float] = None,
+    ) -> Tuple[float, float]:
         """Desired local-frame slot offset (x forward, y left) behind the leader."""
         if robot_id == self.sync_leader_id:
             return (0.0, 0.0)
+        cols = max(1, columns if columns is not None else self.sync_columns)
+        sx = spacing_x if spacing_x is not None else self.sync_spacing_x
+        sy = spacing_y if spacing_y is not None else self.sync_spacing_y
         seq = robot_id if robot_id < self.sync_leader_id else (robot_id - 1)
-        row = (seq // self.sync_columns) + 1
-        col = seq % self.sync_columns
-        y_center = 0.5 * (self.sync_columns - 1)
-        local_x = -row * self.sync_spacing_x
-        local_y = (col - y_center) * self.sync_spacing_y
+        row = (seq // cols) + 1
+        col = seq % cols
+        y_center = 0.5 * (cols - 1)
+        local_x = -row * sx
+        local_y = (col - y_center) * sy
         return (local_x, local_y)
+
+    def _in_bottleneck_zone(self, x: float, y: float) -> bool:
+        """Detect when robot is near the narrow bottleneck corridor."""
+        if not self.bottleneck_mode_enable:
+            return False
+        return (abs(x - self.bneck_cx) <= self.bneck_half_x and
+                abs(y - self.bneck_cy) <= self.bneck_half_y)
 
     def _compute_sync_force(
         self,
@@ -1005,6 +1079,7 @@ class BoidNode(Node):
         my_vx: float,
         my_vy: float,
         obstacle_proximity: float,
+        in_bottleneck: bool,
     ) -> Tuple[Tuple[float, float], float]:
         """Compute leader-referenced sync force and effective weight."""
         if not self.sync_enable or self.robot_id == self.sync_leader_id:
@@ -1021,11 +1096,23 @@ class BoidNode(Node):
         else:
             leader_vx, leader_vy = 0.0, 0.0
 
-        local_x, local_y = self._formation_slot_offset(self.robot_id)
+        sync_cols = self.sync_columns
+        sync_sx = self.sync_spacing_x
+        sync_sy = self.sync_spacing_y
+        sync_gain = self.sync_position_gain
+
+        if in_bottleneck or self._in_bottleneck_zone(leader_pose.x, leader_pose.y):
+            sync_cols = self.bneck_sync_columns
+            sync_sx = self.bneck_sync_spacing_x
+            sync_sy = self.bneck_sync_spacing_y
+            sync_gain *= self.bneck_sync_gain_mult
+
+        local_x, local_y = self._formation_slot_offset(self.robot_id, sync_cols, sync_sx, sync_sy)
         c = math.cos(leader_pose.theta)
         s = math.sin(leader_pose.theta)
         target_x = leader_pose.x + (c * local_x - s * local_y)
         target_y = leader_pose.y + (s * local_x + c * local_y)
+        pos_err = math.hypot(target_x - my_x, target_y - my_y)
 
         pos_fx, pos_fy = self._normalize_vec(target_x - my_x, target_y - my_y)
         vel_fx, vel_fy = self._normalize_vec(leader_vx - my_vx, leader_vy - my_vy)
@@ -1037,7 +1124,8 @@ class BoidNode(Node):
             return ((0.0, 0.0), 0.0)
 
         obs_scale = clamp(1.0 - self.sync_obstacle_relax * obstacle_proximity, 0.25, 1.0)
-        sync_w = clamp(self.sync_position_gain * obs_scale, 0.0, self.sync_max_w)
+        err_boost = clamp(1.0 + self.sync_error_boost_gain * pos_err, 1.0, self.sync_error_boost_max)
+        sync_w = clamp(sync_gain * obs_scale * err_boost, 0.0, self.sync_max_w)
         return ((sync_fx, sync_fy), sync_w)
 
     def _nearest_front_neighbour_distance(

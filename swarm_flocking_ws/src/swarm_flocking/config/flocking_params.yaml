@@ -75,10 +75,23 @@
     sync_columns: 3
     sync_spacing_x: 0.8
     sync_spacing_y: 0.55
-    sync_position_gain: 1.0
+    sync_position_gain: 1.15
     sync_velocity_gain: 0.5
-    sync_max_w: 1.6
+    sync_max_w: 2.0
     sync_obstacle_relax: 0.9
+    sync_error_boost_gain: 0.6
+    sync_error_boost_max: 1.8
+    bottleneck_mode_enable: true
+    bottleneck_center_x: 8.5
+    bottleneck_center_y: 7.5
+    bottleneck_zone_half_x: 3.2
+    bottleneck_zone_half_y: 4.0
+    bottleneck_sync_columns: 1
+    bottleneck_sync_spacing_x: 0.65
+    bottleneck_sync_spacing_y: 0.18
+    bottleneck_sync_gain_mult: 1.8
+    bottleneck_sep_scale: 0.75
+    bottleneck_migration_boost: 1.15
     neighbour_front_angle_deg: 20.0
     neighbour_as_obstacle_distance: 1.3
     neighbour_body_clearance: 0.30
