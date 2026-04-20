@@ -346,7 +346,7 @@ class FlockMonitorNode(Node):
                 if math.hypot(self.robot_states[rid].x - active_wp[0], self.robot_states[rid].y - active_wp[1])
                 <= self.waypoint_reach_radius
             )
-            required = max(1, int(math.ceil(self.waypoint_reach_fraction * self.num_robots)))
+            required = max(1, int(math.ceil(self.waypoint_reach_fraction * max(1, num_active))))
             if self.current_waypoint_index < max(0, len(self.waypoints) - 1) and near_count >= required:
                 self.current_waypoint_index += 1
                 self.waypoints_completed = max(self.waypoints_completed, self.current_waypoint_index)

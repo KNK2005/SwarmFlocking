@@ -105,11 +105,21 @@
     desync_migration_boost: 1.4
     stall_escalation_gain: 0.25
     desync_log_cooldown_s: 20.0
+    use_monitor_waypoint: false
+    context_bottleneck_min_scan: 0.60
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0
     rolling_window_s: 10.0
     goal_tolerance: 1.2
+    waypoint_reach_radius: 1.5
+    waypoint_reach_fraction: 0.6
+    split_recovery_trigger_s: 3.0
+    split_recovery_duration_s: 5.0
+    emergency_w_cohesion: 4.0
+    emergency_w_migration: 0.2
+    default_w_cohesion_restore: 1.6
+    default_w_migration_restore: 0.68
     success_timeout_s: 300.0
     success_max_collision_rate: 0.20
     success_max_mean_cohesion: 3.5

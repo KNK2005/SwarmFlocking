@@ -324,8 +324,9 @@ class BoidNode(Node):
         self.declare_parameter('desync_migration_boost', 1.4)
         self.declare_parameter('stall_escalation_gain', 0.25)
         self.declare_parameter('desync_log_cooldown_s', 12.0)
-        self.declare_parameter('use_monitor_waypoint', True)
+        self.declare_parameter('use_monitor_waypoint', False)
         self.declare_parameter('monitor_waypoint_timeout_s', 3.0)
+        self.declare_parameter('context_bottleneck_min_scan', 0.8)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -428,6 +429,7 @@ class BoidNode(Node):
         self.desync_log_cooldown_s = float(self.get_parameter('desync_log_cooldown_s').value)
         self.use_monitor_waypoint = bool(self.get_parameter('use_monitor_waypoint').value)
         self.monitor_waypoint_timeout_s = float(self.get_parameter('monitor_waypoint_timeout_s').value)
+        self.context_bottleneck_min_scan = float(self.get_parameter('context_bottleneck_min_scan').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -613,6 +615,8 @@ class BoidNode(Node):
                     self.use_monitor_waypoint = bool(value)
                 elif name == 'monitor_waypoint_timeout_s':
                     self.monitor_waypoint_timeout_s = max(0.1, float(value))
+                elif name == 'context_bottleneck_min_scan':
+                    self.context_bottleneck_min_scan = clamp(float(value), 0.2, 2.5)
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -1386,7 +1390,7 @@ class BoidNode(Node):
         if not valid_ranges:
             return 'OPEN_FIELD'
 
-        if min(valid_ranges) < 0.8:
+        if min(valid_ranges) < self.context_bottleneck_min_scan:
             return 'BOTTLENECK'
         if len(neighbors) < 2:
             return 'FRAGMENTED'
