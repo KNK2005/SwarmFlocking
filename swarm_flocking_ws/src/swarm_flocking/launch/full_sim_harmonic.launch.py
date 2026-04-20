@@ -52,10 +52,10 @@ def generate_launch_description():
         'odom_is_local', default_value='false',
         description='If true, add spawn offsets to per-robot local odom before flocking')
     world_name_arg = DeclareLaunchArgument(
-      'world_name', default_value='open_field', description='World basename from swarm_flocking_gazebo/worlds')
+      'world_name', default_value='obstacle_course', description='World basename from swarm_flocking_gazebo/worlds')
     waypoints_arg = DeclareLaunchArgument(
       'waypoints',
-      default_value='[17.0, 10.0]',
+      default_value='[28.0, 7.5]',
       description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor',
     )
     spawn_origin_x_arg = DeclareLaunchArgument(
@@ -75,7 +75,7 @@ def generate_launch_description():
     enable_rviz_arg = DeclareLaunchArgument(
       'enable_rviz', default_value='false', description='Launch RViz viewer')
     enable_obstacle_avoidance_arg = DeclareLaunchArgument(
-      'enable_obstacle_avoidance', default_value='false',
+      'enable_obstacle_avoidance', default_value='true',
       description='Enable boid obstacle avoidance and lidar safety logic')
 
     # Harmonic uses GZ_SIM_RESOURCE_PATH for resolving model:// resources.

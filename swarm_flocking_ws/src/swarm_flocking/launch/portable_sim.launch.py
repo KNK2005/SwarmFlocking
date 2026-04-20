@@ -29,7 +29,7 @@ def generate_launch_description():
             'num_robots', default_value='6',
             description='Number of robots in simulation'),
         DeclareLaunchArgument(
-            'world_name', default_value='open_field',
+            'world_name', default_value='obstacle_course',
             description='World basename used by gazebo backend'),
         DeclareLaunchArgument(
             'headless', default_value='true',
@@ -65,7 +65,7 @@ def generate_launch_description():
             'enable_rviz', default_value='false',
             description='Launch RViz when running headless backend'),
         DeclareLaunchArgument(
-            'enable_obstacle_avoidance', default_value='false',
+            'enable_obstacle_avoidance', default_value='true',
             description='Enable boid obstacle avoidance logic'),
         DeclareLaunchArgument(
             'success_timeout_s', default_value='300.0',
@@ -74,7 +74,7 @@ def generate_launch_description():
             'auto_shutdown_on_completion', default_value='true',
             description='Auto-stop nodes when monitor completes'),
         DeclareLaunchArgument(
-            'waypoints', default_value='[17.0, 10.0]',
+            'waypoints', default_value='[28.0, 7.5]',
             description='Flat waypoint list [x0,y0,x1,y1,...] for headless backend'),
         DeclareLaunchArgument(
             'spawn_coords',
