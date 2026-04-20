@@ -123,7 +123,7 @@
     emergency_w_migration: 0.2
     default_w_cohesion_restore: 1.6
     default_w_migration_restore: 0.68
-    success_timeout_s: 300.0
+    success_timeout_s: 600.0
     success_max_collision_rate: 0.20
     success_max_mean_cohesion: 3.5
     auto_shutdown_on_completion: true

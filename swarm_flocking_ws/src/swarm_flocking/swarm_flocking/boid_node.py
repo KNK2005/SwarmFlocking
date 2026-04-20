@@ -1323,10 +1323,12 @@ class BoidNode(Node):
             not front_is_neighbour
         )
         moving_enough = speed_mag >= max(0.015, 0.6 * self.stuck_speed_thresh)
+        tiny_progress = max(0.005, 0.12 * relaxed_progress)
+        moving_toward_goal = improvement >= tiny_progress
 
         if (now - self._last_progress_time) >= self.progress_timeout_s and now >= self._desync_until:
-            if (not blocked_front) and moving_enough:
-                # Robot is still flowing; avoid false positive stall escalation.
+            if (not blocked_front) and moving_enough and moving_toward_goal:
+                # Robot is still reducing waypoint distance; avoid false positive stall escalation.
                 self._last_progress_time = now
                 return
 
