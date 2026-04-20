@@ -27,7 +27,7 @@ import os
 import re
 import subprocess
 from collections import deque
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -132,6 +132,7 @@ class FlockMonitorNode(Node):
         self.declare_parameter('default_w_cohesion_restore', 1.0)
         self.declare_parameter('default_w_migration_restore', 0.3)
         self.declare_parameter('success_timeout_s', 300.0)
+        self.declare_parameter('timeout_progress_grace_s', 180.0)
         self.declare_parameter('success_max_collision_rate', 0.20)
         self.declare_parameter('success_max_mean_cohesion', 3.5)
         self.declare_parameter('auto_shutdown_on_completion', True)
@@ -156,6 +157,7 @@ class FlockMonitorNode(Node):
         self.default_w_cohesion_restore = max(0.0, float(self.get_parameter('default_w_cohesion_restore').value))
         self.default_w_migration_restore = max(0.0, float(self.get_parameter('default_w_migration_restore').value))
         self.success_timeout_s = max(1.0, float(self.get_parameter('success_timeout_s').value))
+        self.timeout_progress_grace_s = max(1.0, float(self.get_parameter('timeout_progress_grace_s').value))
         self.success_max_collision_rate = max(0.0, float(self.get_parameter('success_max_collision_rate').value))
         self.success_max_mean_cohesion = max(0.0, float(self.get_parameter('success_max_mean_cohesion').value))
         self.auto_shutdown_on_completion = bool(self.get_parameter('auto_shutdown_on_completion').value)
@@ -180,6 +182,7 @@ class FlockMonitorNode(Node):
         self.completion_reason = 'running'
         self._shutdown_timer = None
         self._last_log_time = 0.0
+        self._last_waypoint_advance_time: Optional[float] = None
         self.split_timer = 0.0
         self.split_events_count = 0
         self._split_started_at = None
@@ -275,6 +278,7 @@ class FlockMonitorNode(Node):
         now = time.monotonic()
         if self.start_time is None:
             self.start_time = now
+            self._last_waypoint_advance_time = now
 
         stamp = self.get_clock().now().to_msg()
 
@@ -367,6 +371,7 @@ class FlockMonitorNode(Node):
             if self.current_waypoint_index < max(0, len(self.waypoints) - 1) and near_count >= required:
                 self.current_waypoint_index += 1
                 self.waypoints_completed = max(self.waypoints_completed, self.current_waypoint_index)
+                self._last_waypoint_advance_time = now
                 active_wp = self._get_active_waypoint()
                 if active_wp is not None:
                     self.get_logger().info(
@@ -487,7 +492,11 @@ class FlockMonitorNode(Node):
             )
             return
 
-        if elapsed_time >= self.success_timeout_s:
+        since_progress = float('inf')
+        if self._last_waypoint_advance_time is not None:
+            since_progress = max(0.0, now - self._last_waypoint_advance_time)
+
+        if elapsed_time >= self.success_timeout_s and since_progress >= self.timeout_progress_grace_s:
             self._finalize_experiment(
                 False,
                 'timeout_before_goal',
