@@ -301,21 +301,21 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     return actions
 
 
-  def _parse_float_list(text: str):
+def _parse_float_list(text: str):
     """Parse a launch argument list from Python-literal or CSV form."""
     if text is None:
-      return []
+        return []
 
     text = str(text).strip()
     if not text:
-      return []
+        return []
 
     try:
-      parsed = ast.literal_eval(text)
-      if isinstance(parsed, (list, tuple)):
-        return [float(v) for v in parsed]
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, (list, tuple)):
+            return [float(v) for v in parsed]
     except Exception:
-      pass
+        pass
 
     return [float(v.strip()) for v in text.split(',') if v.strip()]
 
