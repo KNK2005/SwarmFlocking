@@ -17,36 +17,44 @@
     num_robots: 6
 
     # ─── Reynolds Force Weights ───────────────────────────────────────────────
-    w_separation: 1.1     # Prevent collisions without over-dispersing at spawn
-    w_alignment:  1.2     # Strong heading synchronization
-    w_cohesion:   1.4     # Keep flock compact through corridor turns
-    w_obstacle:   3.4     # Reactive obstacle avoidance (LaserScan-based)
-    w_migration:  0.42    # Stronger waypoint pull for steady forward progress
+    w_separation: 1.0     # Prevent collisions without over-dispersing at spawn
+    w_alignment:  1.4     # Strong heading synchronization
+    w_cohesion:   1.9     # Keep flock compact through corridor turns
+    w_obstacle:   3.3     # Reactive obstacle avoidance (LaserScan-based)
+    w_migration:  0.62    # Stronger waypoint pull for faster progress
 
     # ─── Sensing Ranges (meters) ──────────────────────────────────────────────
-    neighbor_radius:    3.8   # Improve group connectivity in larger spread
-    separation_radius:  0.6   # Avoid strong initial repulsion at spawn spacing
+    neighbor_radius:    4.5   # Improve group connectivity in larger spread
+    separation_radius:  0.5   # Avoid strong initial repulsion at spawn spacing
     obstacle_threshold: 0.85  # Early avoidance without excessive pre-turning
 
     # ─── Motion Limits ────────────────────────────────────────────────────────
-    max_linear_vel:  0.20     # m/s for practical waypoint completion time
-    max_angular_vel: 2.2      # rad/s
-    lpf_alpha: 0.4            # Velocity low-pass smoothing factor
+    max_linear_vel:  0.22     # m/s (faster traversal)
+    max_angular_vel: 2.4      # rad/s
+    lpf_alpha: 0.55           # Faster command response
     waypoint_arrival_radius: 1.2
     stop_on_goal_reached: true
 
     # ─── Adaptive Control Bounds ──────────────────────────────────────────────
-    k_sep: 0.45
-    min_sep_w: 0.8
-    max_sep_w: 2.2
-    alpha_coh: 0.35
-    min_coh_w: 0.8
-    max_coh_w: 2.8
-    ideal_separation: 0.8
-    threshold_spread: 1.0
+    k_sep: 0.35
+    min_sep_w: 0.7
+    max_sep_w: 1.8
+    alpha_coh: 0.45
+    min_coh_w: 1.0
+    max_coh_w: 3.2
+    ideal_separation: 0.7
+    threshold_spread: 0.9
     min_obs_w: 1.2
     max_obs_w: 5.5
     laser_epsilon: 0.01
+
+    # ─── Regroup + Front-Obstacle Speed Control ─────────────────────────────
+    regroup_spread_threshold: 1.4
+    regroup_gain: 1.0
+    max_regroup_w: 2.0
+    front_slowdown_distance: 0.85
+    min_front_speed_scale: 0.35
+    front_fov_deg: 80.0
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0

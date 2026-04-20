@@ -251,6 +251,12 @@ class BoidNode(Node):
         self.declare_parameter('min_obs_w',          1.0)
         self.declare_parameter('max_obs_w',          5.0)
         self.declare_parameter('laser_epsilon',      0.01)
+        self.declare_parameter('regroup_spread_threshold', 1.4)
+        self.declare_parameter('regroup_gain',       1.0)
+        self.declare_parameter('max_regroup_w',      2.0)
+        self.declare_parameter('front_slowdown_distance', 1.0)
+        self.declare_parameter('min_front_speed_scale', 0.2)
+        self.declare_parameter('front_fov_deg',      80.0)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -295,6 +301,12 @@ class BoidNode(Node):
         self.min_obs_w     = float(self.get_parameter('min_obs_w').value)
         self.max_obs_w     = float(self.get_parameter('max_obs_w').value)
         self.laser_eps     = float(self.get_parameter('laser_epsilon').value)
+        self.regroup_spread_thresh = float(self.get_parameter('regroup_spread_threshold').value)
+        self.regroup_gain  = float(self.get_parameter('regroup_gain').value)
+        self.max_regroup_w = float(self.get_parameter('max_regroup_w').value)
+        self.front_slowdown_dist = float(self.get_parameter('front_slowdown_distance').value)
+        self.min_front_speed_scale = float(self.get_parameter('min_front_speed_scale').value)
+        self.front_fov_deg = float(self.get_parameter('front_fov_deg').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -364,6 +376,18 @@ class BoidNode(Node):
                     self.max_obs_w = float(value)
                 elif name == 'laser_epsilon':
                     self.laser_eps = max(1e-4, float(value))
+                elif name == 'regroup_spread_threshold':
+                    self.regroup_spread_thresh = max(0.1, float(value))
+                elif name == 'regroup_gain':
+                    self.regroup_gain = max(0.0, float(value))
+                elif name == 'max_regroup_w':
+                    self.max_regroup_w = max(0.0, float(value))
+                elif name == 'front_slowdown_distance':
+                    self.front_slowdown_dist = max(0.05, float(value))
+                elif name == 'min_front_speed_scale':
+                    self.min_front_speed_scale = clamp(float(value), 0.0, 1.0)
+                elif name == 'front_fov_deg':
+                    self.front_fov_deg = clamp(float(value), 20.0, 180.0)
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -513,6 +537,8 @@ class BoidNode(Node):
         eff_w_coh = self.w_coh
         eff_w_obs = self.w_obs
         eff_w_mig = self.w_mig
+        regroup_w = 0.0
+        f_regroup = (0.0, 0.0)
 
         if neighbours:
             # 1. Crowding Response (Bounded Separation Scaling)
@@ -526,6 +552,19 @@ class BoidNode(Node):
             local_coh = math.hypot(my_x - cx, my_y - cy)
             spread_factor = max(0.0, local_coh - self.thresh_spread)
             eff_w_coh = clamp(self.w_coh * (1.0 + self.alpha_coh * spread_factor), self.min_coh_w, self.max_coh_w)
+
+            # 2b. Regroup mode when local spread gets too high.
+            if local_coh > self.regroup_spread_thresh:
+                spread_excess = local_coh - self.regroup_spread_thresh
+                regroup_w = clamp(
+                    self.regroup_gain * (spread_excess / max(self.regroup_spread_thresh, 0.1)),
+                    0.0,
+                    self.max_regroup_w,
+                )
+                f_regroup = compute_migration(my_x, my_y, cx, cy)
+                # Soften separation while regrouping to reduce further breakup.
+                sep_soften = clamp(1.0 - 0.35 * regroup_w / max(self.max_regroup_w, 1e-6), 0.6, 1.0)
+                eff_w_sep *= sep_soften
 
         # 3. Threat-Proximity Response (Safe Obstacle Scaling)
         if self.latest_scan and getattr(self.latest_scan, 'ranges', None):
@@ -554,13 +593,15 @@ class BoidNode(Node):
               eff_w_ali * f_ali[0] +
               eff_w_coh * f_coh[0] +
               eff_w_obs * f_obs[0] +
-              eff_w_mig * f_mig[0])
+              eff_w_mig * f_mig[0] +
+              regroup_w * f_regroup[0])
 
         fy = (eff_w_sep * f_sep[1] +
               eff_w_ali * f_ali[1] +
               eff_w_coh * f_coh[1] +
               eff_w_obs * f_obs[1] +
-              eff_w_mig * f_mig[1])
+              eff_w_mig * f_mig[1] +
+              regroup_w * f_regroup[1])
 
         # Step 4: convert resultant force → (linear, angular) commands
         lin, ang = force_to_cmd_vel(fx, fy, my_theta, self.max_lin, self.max_ang)
@@ -572,8 +613,9 @@ class BoidNode(Node):
                     (1.0 - self.lpf_alpha) * self._smooth_ang)
 
         # Step 6: clamp and publish
+        front_speed_scale = self._compute_front_speed_scale()
         cmd = Twist()
-        cmd.linear.x  = clamp(self._smooth_lin, -self.max_lin, self.max_lin)
+        cmd.linear.x  = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
         cmd.angular.z = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
         self.cmd_pub.publish(cmd)
 
@@ -639,6 +681,34 @@ class BoidNode(Node):
                 f'robot_{self.robot_id} reached waypoint {self.current_wp} '
                 f'({gx}, {gy}) → advancing')
             self.current_wp += 1
+
+    def _compute_front_speed_scale(self) -> float:
+        """Return [min_front_speed_scale, 1.0] based on nearest obstacle ahead."""
+        scan = self.latest_scan
+        if scan is None or not getattr(scan, 'ranges', None):
+            return 1.0
+
+        half_fov = math.radians(max(1.0, self.front_fov_deg) * 0.5)
+        min_front = float('inf')
+
+        for i, r in enumerate(scan.ranges):
+            if not math.isfinite(r):
+                continue
+            if r <= 0.0:
+                continue
+            angle = scan.angle_min + i * scan.angle_increment
+            if abs(angle) <= half_fov:
+                min_front = min(min_front, r)
+
+        if not math.isfinite(min_front):
+            return 1.0
+
+        proximity = clamp(
+            (self.front_slowdown_dist - min_front) / max(self.front_slowdown_dist, self.laser_eps),
+            0.0,
+            1.0,
+        )
+        return clamp(1.0 - proximity * (1.0 - self.min_front_speed_scale), self.min_front_speed_scale, 1.0)
 
 
 # ---------------------------------------------------------------------------
