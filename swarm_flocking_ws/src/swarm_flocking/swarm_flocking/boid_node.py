@@ -502,8 +502,10 @@ class BoidNode(Node):
         # Step 3: Adaptive Weight Scaling
         # ----------------------------------------------------------------
         eff_w_sep = self.w_sep
+        eff_w_ali = self.w_ali
         eff_w_coh = self.w_coh
         eff_w_obs = self.w_obs
+        eff_w_mig = self.w_mig
 
         if neighbours:
             # 1. Crowding Response (Bounded Separation Scaling)
@@ -524,6 +526,10 @@ class BoidNode(Node):
             if valid_ranges:
                 min_laser_dist = min(valid_ranges)
                 safe_dist = max(min_laser_dist, self.laser_eps)
+                proximity = clamp((self.obs_thresh - safe_dist) / max(self.obs_thresh, self.laser_eps), 0.0, 1.0)
+                eff_w_mig = self.w_mig * (1.0 - 0.9 * proximity)
+                eff_w_ali = self.w_ali * (1.0 + 0.5 * proximity)
+                eff_w_coh = clamp(eff_w_coh * (1.0 + 0.3 * proximity), self.min_coh_w, self.max_coh_w)
                 scale = min(self.max_obs_w / self.w_obs if self.w_obs > 0 else 1.0, self.obs_thresh / safe_dist)
                 eff_w_obs = clamp(self.w_obs * scale, self.min_obs_w, self.max_obs_w)
 
@@ -531,16 +537,16 @@ class BoidNode(Node):
         # Step 4: Weighted sum
         # ----------------------------------------------------------------
         fx = (eff_w_sep * f_sep[0] +
-              self.w_ali * f_ali[0] +
+              eff_w_ali * f_ali[0] +
               eff_w_coh * f_coh[0] +
               eff_w_obs * f_obs[0] +
-              self.w_mig * f_mig[0])
+              eff_w_mig * f_mig[0])
 
         fy = (eff_w_sep * f_sep[1] +
-              self.w_ali * f_ali[1] +
+              eff_w_ali * f_ali[1] +
               eff_w_coh * f_coh[1] +
               eff_w_obs * f_obs[1] +
-              self.w_mig * f_mig[1])
+              eff_w_mig * f_mig[1])
 
         # Step 4: convert resultant force → (linear, angular) commands
         lin, ang = force_to_cmd_vel(fx, fy, my_theta, self.max_lin, self.max_ang)
