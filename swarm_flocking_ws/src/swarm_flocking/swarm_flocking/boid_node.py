@@ -196,6 +196,14 @@ class BoidNode(Node):
             Odometry, f'{ns}/odom',
             self._odom_callback, SENSOR_QOS)
 
+        # Fallback odom topics used by some Gazebo Harmonic setups.
+        self.create_subscription(
+            Odometry, f'/model/robot_{self.robot_id}/odometry',
+            self._odom_callback, SENSOR_QOS)
+        self.create_subscription(
+            Odometry, f'/model/robot_{self.robot_id}/odometry_with_covariance',
+            self._odom_callback, SENSOR_QOS)
+
         self.create_subscription(
             LaserScan, f'{ns}/scan',
             self._scan_callback, SENSOR_QOS)
@@ -1164,7 +1172,7 @@ class BoidNode(Node):
         my_vy: float,
     ) -> None:
         """Compact-group controller used for no-obstacle coordinated runs."""
-        neighbours = self._get_valid_neighbours(my_x, my_y)
+        neighbours = self._get_active_neighbours_global(my_x, my_y)
         target_wp = self._get_active_waypoint_target()
         if target_wp is None:
             cmd = Twist()
@@ -1206,6 +1214,9 @@ class BoidNode(Node):
 
         lin, ang = force_to_cmd_vel(fx, fy, my_theta, self.max_lin, self.max_ang)
         lin = max(0.0, lin)
+        # Slow translation when spread is high so regroup can happen before further drift.
+        speed_scale = clamp(1.0 - 0.55 * min(1.0, spread_ratio), 0.35, 1.0)
+        lin *= speed_scale
         self._smooth_lin = (self.lpf_alpha * lin + (1.0 - self.lpf_alpha) * self._smooth_lin)
         self._smooth_ang = (self.lpf_alpha * ang + (1.0 - self.lpf_alpha) * self._smooth_ang)
 
@@ -1218,6 +1229,26 @@ class BoidNode(Node):
         self._stall_wp = -1
         self._stall_count = 0
         self._advance_waypoint(my_x, my_y)
+
+    def _get_active_neighbours_global(self, my_x: float, my_y: float) -> list:
+        """Return all fresh neighbours regardless of distance (for global cohesion mode)."""
+        now = time.monotonic()
+        result = []
+
+        for rid, np in self.neighbour_poses.items():
+            if (now - np.timestamp) > STALE_TIMEOUT_S:
+                continue
+
+            dist = math.hypot(np.x - my_x, np.y - my_y)
+            nv = self.neighbour_vels.get(rid)
+            if nv is not None and (now - nv.timestamp) <= STALE_TIMEOUT_S:
+                vx, vy = nv.vx, nv.vy
+            else:
+                vx, vy = 0.0, 0.0
+
+            result.append((rid, np.x, np.y, vx, vy, dist))
+
+        return result
 
     # ====================================================================
     # Neighbour helper

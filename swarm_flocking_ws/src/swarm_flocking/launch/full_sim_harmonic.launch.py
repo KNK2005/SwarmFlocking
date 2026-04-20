@@ -236,8 +236,18 @@ def _spawn_all_harmonic(context, *args, **kwargs):
           arguments=[
             f'/model/{ns}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
           ],
-          remappings=[
-            (f'/model/{ns}/odometry', f'/{ns}/odom'),
+          respawn=True,
+          respawn_delay=1.0,
+          output='screen',
+        )
+      )
+      actions.append(
+        RosNode(
+          package='ros_gz_bridge',
+          executable='parameter_bridge',
+          name=f'ros_gz_bridge_{ns}_odom_model_cov',
+          arguments=[
+            f'/model/{ns}/odometry_with_covariance@nav_msgs/msg/Odometry[gz.msgs.Odometry',
           ],
           respawn=True,
           respawn_delay=1.0,
