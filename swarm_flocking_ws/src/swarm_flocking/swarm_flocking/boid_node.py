@@ -152,6 +152,9 @@ class BoidNode(Node):
         self._smooth_lin: float = 0.0
         self._smooth_ang: float = 0.0
         self._last_no_odom_warn: float = 0.0
+        self._front_blocked_since: Optional[float] = None
+        self._recover_until: float = 0.0
+        self._recover_turn_dir: float = 1.0
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -261,6 +264,11 @@ class BoidNode(Node):
         self.declare_parameter('escape_turn_rate',   2.0)
         self.declare_parameter('wall_follow_gain',   1.1)
         self.declare_parameter('wall_follow_max_w',  1.6)
+        self.declare_parameter('stuck_front_time_s', 1.0)
+        self.declare_parameter('stuck_speed_threshold', 0.03)
+        self.declare_parameter('recover_reverse_speed', 0.06)
+        self.declare_parameter('recover_turn_rate', 2.2)
+        self.declare_parameter('recover_duration_s', 1.0)
         self.declare_parameter('goal_projection_min', 0.45)
         self.declare_parameter('goal_projection_gain', 1.2)
         self.declare_parameter('goal_projection_max_boost', 1.4)
@@ -321,6 +329,11 @@ class BoidNode(Node):
         self.escape_turn_rate = float(self.get_parameter('escape_turn_rate').value)
         self.wall_follow_gain = float(self.get_parameter('wall_follow_gain').value)
         self.wall_follow_max_w = float(self.get_parameter('wall_follow_max_w').value)
+        self.stuck_front_time_s = float(self.get_parameter('stuck_front_time_s').value)
+        self.stuck_speed_thresh = float(self.get_parameter('stuck_speed_threshold').value)
+        self.recover_reverse_speed = float(self.get_parameter('recover_reverse_speed').value)
+        self.recover_turn_rate = float(self.get_parameter('recover_turn_rate').value)
+        self.recover_duration_s = float(self.get_parameter('recover_duration_s').value)
         self.goal_proj_min = float(self.get_parameter('goal_projection_min').value)
         self.goal_proj_gain = float(self.get_parameter('goal_projection_gain').value)
         self.goal_proj_max_boost = float(self.get_parameter('goal_projection_max_boost').value)
@@ -416,6 +429,16 @@ class BoidNode(Node):
                     self.wall_follow_gain = max(0.0, float(value))
                 elif name == 'wall_follow_max_w':
                     self.wall_follow_max_w = max(0.0, float(value))
+                elif name == 'stuck_front_time_s':
+                    self.stuck_front_time_s = max(0.1, float(value))
+                elif name == 'stuck_speed_threshold':
+                    self.stuck_speed_thresh = max(0.0, float(value))
+                elif name == 'recover_reverse_speed':
+                    self.recover_reverse_speed = max(0.0, float(value))
+                elif name == 'recover_turn_rate':
+                    self.recover_turn_rate = max(0.1, float(value))
+                elif name == 'recover_duration_s':
+                    self.recover_duration_s = max(0.1, float(value))
                 elif name == 'goal_projection_min':
                     self.goal_proj_min = max(0.0, float(value))
                 elif name == 'goal_projection_gain':
@@ -557,6 +580,18 @@ class BoidNode(Node):
 
         my_x, my_y, my_theta = self.my_pose
         my_vx, my_vy = self.my_vel
+        now = time.monotonic()
+
+        # Timed recovery mode to break local minima near bottlenecks/walls.
+        if now < self._recover_until:
+            cmd = Twist()
+            cmd.linear.x = -min(self.recover_reverse_speed, self.max_lin)
+            cmd.angular.z = clamp(self._recover_turn_dir * self.recover_turn_rate, -self.max_ang, self.max_ang)
+            self._smooth_lin = 0.0
+            self._smooth_ang = cmd.angular.z
+            self.cmd_pub.publish(cmd)
+            self._advance_waypoint(my_x, my_y)
+            return
 
         # Step 1: collect valid, non-stale neighbours
         neighbours = self._get_valid_neighbours(my_x, my_y)
@@ -703,6 +738,27 @@ class BoidNode(Node):
             desired_escape = turn_dir * self.escape_turn_rate
             if abs(ang_cmd) < abs(desired_escape):
                 ang_cmd = desired_escape
+
+            speed_mag = math.hypot(self.my_vel[0], self.my_vel[1])
+            if self._front_blocked_since is None:
+                self._front_blocked_since = now
+            elif ((now - self._front_blocked_since) >= self.stuck_front_time_s and
+                  speed_mag <= self.stuck_speed_thresh):
+                self._recover_turn_dir = turn_dir
+                self._recover_until = now + self.recover_duration_s
+                self._front_blocked_since = None
+                self.get_logger().info(
+                    f'robot_{self.robot_id} recovery: blocked front={front_min:.2f}m, speed={speed_mag:.2f}m/s')
+                cmd = Twist()
+                cmd.linear.x = -min(self.recover_reverse_speed, self.max_lin)
+                cmd.angular.z = clamp(self._recover_turn_dir * self.recover_turn_rate, -self.max_ang, self.max_ang)
+                self._smooth_lin = 0.0
+                self._smooth_ang = cmd.angular.z
+                self.cmd_pub.publish(cmd)
+                self._advance_waypoint(my_x, my_y)
+                return
+        else:
+            self._front_blocked_since = None
 
         cmd = Twist()
         cmd.linear.x  = lin_cmd

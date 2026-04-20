@@ -32,7 +32,7 @@
     max_linear_vel:  0.22     # m/s (faster traversal)
     max_angular_vel: 2.4      # rad/s
     lpf_alpha: 0.55           # Faster command response
-    waypoint_arrival_radius: 1.2
+    waypoint_arrival_radius: 0.9
     stop_on_goal_reached: true
 
     # ─── Adaptive Control Bounds ──────────────────────────────────────────────
@@ -59,6 +59,11 @@
     escape_turn_rate: 2.3
     wall_follow_gain: 1.1
     wall_follow_max_w: 1.6
+    stuck_front_time_s: 0.9
+    stuck_speed_threshold: 0.03
+    recover_reverse_speed: 0.07
+    recover_turn_rate: 2.3
+    recover_duration_s: 1.0
     goal_projection_min: 0.45
     goal_projection_gain: 1.2
     goal_projection_max_boost: 1.4
@@ -78,14 +83,26 @@
     log_interval_s: 5.0
 
     # ─── Waypoints (flat list: x0, y0, x1, y1, ...) ──────────────────────────
-    # Matches the obstacle_course.world layout:
-    #   Start zone → through bottleneck → open field → goal zone
+    # Hardcoded obstacle-course path:
+    #   Start gather -> bottleneck gap -> open-field lane -> around maze walls -> goal.
     waypoints:
-      - 8.0    # WP0 x — approach bottleneck
-      - 7.5    # WP0 y
-      - 15.0   # WP1 x — cross open field
-      - 7.5    # WP1 y
-      - 22.0   # WP2 x — enter maze section
-      - 7.5    # WP2 y
-      - 28.0   # WP3 x — reach goal zone
-      - 7.5    # WP3 y
+      - 5.5    # WP0: leave spawn cluster toward center lane
+      - 6.0
+      - 7.6    # WP1: align with bottleneck entrance
+      - 7.3
+      - 9.2    # WP2: clear bottleneck wall at x=8.5
+      - 7.5
+      - 13.5   # WP3: open-field transit (above divider gap)
+      - 7.5
+      - 18.5   # WP4: approach maze
+      - 7.5
+      - 22.0   # WP5: begin north bypass around center maze wall
+      - 8.8
+      - 23.7   # WP6: pass above maze_v1 (y > 9.5 corridor)
+      - 9.8
+      - 25.4   # WP7: continue between h2/h3 constraints
+      - 9.8
+      - 27.6   # WP8: descend after maze exit funnel
+      - 8.6
+      - 28.0   # WP9: goal zone center
+      - 7.5
