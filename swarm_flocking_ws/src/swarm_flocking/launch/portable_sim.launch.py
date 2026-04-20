@@ -74,7 +74,7 @@ def generate_launch_description():
             'auto_shutdown_on_completion', default_value='true',
             description='Auto-stop nodes when monitor completes'),
         DeclareLaunchArgument(
-            'waypoints', default_value='[6.0, 6.5, 9.0, 7.6, 12.0, 8.6, 15.0, 9.4, 17.0, 10.0]',
+            'waypoints', default_value='[17.0, 10.0]',
             description='Flat waypoint list [x0,y0,x1,y1,...] for headless backend'),
         DeclareLaunchArgument(
             'spawn_coords',

@@ -55,7 +55,7 @@ def generate_launch_description():
       'world_name', default_value='open_field', description='World basename from swarm_flocking_gazebo/worlds')
     waypoints_arg = DeclareLaunchArgument(
       'waypoints',
-      default_value='[6.0, 6.5, 9.0, 7.6, 12.0, 8.6, 15.0, 9.4, 17.0, 10.0]',
+      default_value='[17.0, 10.0]',
       description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor',
     )
     spawn_origin_x_arg = DeclareLaunchArgument(
