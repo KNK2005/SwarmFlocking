@@ -181,7 +181,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                       '-allow_renaming', 'true',
                         '-x', str(x),
                         '-y', str(y),
-                        '-z', '0.08',
+                      '-z', '0.0',
                         '-file', sdf_path,
                     ],
                     output='screen',
@@ -237,11 +237,11 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
     return f"""<?xml version=\"1.0\"?>
 <sdf version=\"1.9\">
   <model name=\"{robot_ns}\">
-    <pose>0 0 0.08 0 0 0</pose>
+    <pose>0 0 0 0 0 0</pose>
     <static>false</static>
 
     <link name=\"base_footprint\">
-      <pose>0 0 0.04 0 0 0</pose>
+      <pose>0 0 0.06 0 0 0</pose>
       <inertial>
         <mass>1.2</mass>
         <inertia>
@@ -251,12 +251,20 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
       </inertial>
       <collision name=\"base_collision\">
         <geometry>
-          <box><size>0.18 0.16 0.08</size></box>
+          <box><size>0.18 0.16 0.06</size></box>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.02</mu>
+              <mu2>0.02</mu2>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name=\"base_visual\">
         <geometry>
-          <box><size>0.18 0.16 0.08</size></box>
+          <box><size>0.18 0.16 0.06</size></box>
         </geometry>
         <material>
           <ambient>0.2 0.6 0.9 1</ambient>
@@ -300,6 +308,14 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
         <geometry>
           <cylinder><radius>0.033</radius><length>0.02</length></cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>2.0</mu>
+              <mu2>2.0</mu2>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name=\"left_wheel_visual\">
         <geometry>
@@ -321,6 +337,14 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
         <geometry>
           <cylinder><radius>0.033</radius><length>0.02</length></cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>2.0</mu>
+              <mu2>2.0</mu2>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name=\"right_wheel_visual\">
         <geometry>
@@ -330,24 +354,40 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
     </link>
 
     <link name=\"caster_front\">
-      <pose>0.08 0 0.015 0 0 0</pose>
+      <pose>0.08 0 0.012 0 0 0</pose>
       <inertial><mass>0.02</mass></inertial>
       <collision name=\"caster_front_collision\">
-        <geometry><sphere><radius>0.015</radius></sphere></geometry>
+        <geometry><sphere><radius>0.012</radius></sphere></geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.01</mu>
+              <mu2>0.01</mu2>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name=\"caster_front_visual\">
-        <geometry><sphere><radius>0.015</radius></sphere></geometry>
+        <geometry><sphere><radius>0.012</radius></sphere></geometry>
       </visual>
     </link>
 
     <link name=\"caster_back\">
-      <pose>-0.08 0 0.015 0 0 0</pose>
+      <pose>-0.08 0 0.012 0 0 0</pose>
       <inertial><mass>0.02</mass></inertial>
       <collision name=\"caster_back_collision\">
-        <geometry><sphere><radius>0.015</radius></sphere></geometry>
+        <geometry><sphere><radius>0.012</radius></sphere></geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.01</mu>
+              <mu2>0.01</mu2>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name=\"caster_back_visual\">
-        <geometry><sphere><radius>0.015</radius></sphere></geometry>
+        <geometry><sphere><radius>0.012</radius></sphere></geometry>
       </visual>
     </link>
 
@@ -355,7 +395,7 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
       <parent>base_footprint</parent>
       <child>left_wheel</child>
       <axis>
-        <xyz>0 1 0</xyz>
+        <xyz expressed_in=\"__model__\">0 1 0</xyz>
         <limit><lower>-1e16</lower><upper>1e16</upper></limit>
       </axis>
     </joint>
@@ -364,7 +404,7 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
       <parent>base_footprint</parent>
       <child>right_wheel</child>
       <axis>
-        <xyz>0 1 0</xyz>
+        <xyz expressed_in=\"__model__\">0 1 0</xyz>
         <limit><lower>-1e16</lower><upper>1e16</upper></limit>
       </axis>
     </joint>
