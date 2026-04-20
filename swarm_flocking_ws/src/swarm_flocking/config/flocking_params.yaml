@@ -68,21 +68,26 @@
     goal_projection_gain: 1.2
     goal_projection_max_boost: 1.4
     goal_projection_obs_relax: 0.85
-    waypoint_sync_fraction: 0.2
+    waypoint_sync_fraction: 0.15
     waypoint_sync_radius_scale: 1.6
     sync_enable: true
-    sync_leader_id: 0
+    sync_leader_id: 2
     sync_columns: 3
     sync_spacing_x: 0.8
     sync_spacing_y: 0.55
-    sync_position_gain: 1.4
+    sync_position_gain: 1.0
     sync_velocity_gain: 0.5
-    sync_max_w: 2.2
+    sync_max_w: 1.6
     sync_obstacle_relax: 0.9
     neighbour_front_angle_deg: 20.0
     neighbour_as_obstacle_distance: 1.3
     neighbour_scan_match_tol: 0.22
     neighbour_obstacle_scale: 0.2
+    progress_timeout_s: 4.0
+    progress_min_delta: 0.12
+    desync_duration_s: 2.0
+    desync_sync_scale: 0.25
+    desync_migration_boost: 1.4
 
     # ─── Experiment Management (flock_monitor_node) ─────────────────────────
     monitor_rate_hz: 2.0
