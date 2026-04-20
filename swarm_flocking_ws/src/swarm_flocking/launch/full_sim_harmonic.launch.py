@@ -46,6 +46,9 @@ def generate_launch_description():
     # Default false for robustness: if /clock is missing, ROS-time timers stall.
     use_sim_time_arg = DeclareLaunchArgument(
       'use_sim_time', default_value='false', description='Use simulation clock')
+    odom_is_local_arg = DeclareLaunchArgument(
+        'odom_is_local', default_value='true',
+        description='If true, add spawn offsets to per-robot local odom before flocking')
     world_name_arg = DeclareLaunchArgument(
         'world_name', default_value='obstacle_course', description='World basename from swarm_flocking_gazebo/worlds')
 
@@ -90,6 +93,7 @@ def generate_launch_description():
     return LaunchDescription([
         num_robots_arg,
         use_sim_time_arg,
+        odom_is_local_arg,
         world_name_arg,
         gz_resource_path,
         ign_resource_path,
@@ -117,6 +121,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
 
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
     use_sim_time = context.launch_configurations.get('use_sim_time', 'false')
+    odom_is_local = context.launch_configurations.get('odom_is_local', 'true').lower() == 'true'
     start_x, start_y = 2.0, 4.5
     spacing = 0.7
 
@@ -230,7 +235,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                             'num_robots': num_robots,
                             'spawn_x': x,
                             'spawn_y': y,
-                            'odom_is_local': False,
+                            'odom_is_local': odom_is_local,
                             'use_sim_time': use_sim_time == 'true',
                         },
                     ],

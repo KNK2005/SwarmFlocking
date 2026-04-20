@@ -35,6 +35,9 @@ def generate_launch_description():
             'gazebo_flavor', default_value='auto',
             description='Gazebo backend flavor: auto, harmonic, or classic'),
         DeclareLaunchArgument(
+            'odom_is_local', default_value='true',
+            description='When using Harmonic, interpret odom as local and apply spawn offsets'),
+        DeclareLaunchArgument(
             'dt', default_value='0.1',
             description='Physics timestep for headless backend'),
         DeclareLaunchArgument(
@@ -119,6 +122,7 @@ def _dispatch_backend(context, *args, **kwargs):
                         'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
                         # Harmonic can run without bridged /clock; keep ROS timers alive.
                         'use_sim_time': 'false',
+                        'odom_is_local': context.launch_configurations.get('odom_is_local', 'true'),
                     }.items(),
                 ),
             ]
