@@ -81,8 +81,10 @@
     sync_obstacle_relax: 0.9
     neighbour_front_angle_deg: 20.0
     neighbour_as_obstacle_distance: 1.3
-    neighbour_scan_match_tol: 0.22
-    neighbour_obstacle_scale: 0.2
+    neighbour_body_clearance: 0.30
+    neighbour_scan_match_tol: 0.35
+    neighbour_obstacle_scale: 0.05
+    startup_relax_s: 6.0
     progress_timeout_s: 4.0
     progress_min_delta: 0.12
     desync_duration_s: 2.0

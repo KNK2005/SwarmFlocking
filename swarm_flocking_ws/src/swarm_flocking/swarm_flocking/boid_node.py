@@ -158,6 +158,7 @@ class BoidNode(Node):
         self._last_wp_dist: Optional[float] = None
         self._last_progress_time: float = time.monotonic()
         self._desync_until: float = 0.0
+        self._start_time: float = time.monotonic()
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -289,8 +290,10 @@ class BoidNode(Node):
         self.declare_parameter('sync_obstacle_relax', 0.9)
         self.declare_parameter('neighbour_front_angle_deg', 20.0)
         self.declare_parameter('neighbour_as_obstacle_distance', 1.3)
+        self.declare_parameter('neighbour_body_clearance', 0.30)
         self.declare_parameter('neighbour_scan_match_tol', 0.22)
         self.declare_parameter('neighbour_obstacle_scale', 0.2)
+        self.declare_parameter('startup_relax_s', 6.0)
         self.declare_parameter('progress_timeout_s', 4.0)
         self.declare_parameter('progress_min_delta', 0.12)
         self.declare_parameter('desync_duration_s', 2.0)
@@ -372,8 +375,10 @@ class BoidNode(Node):
         self.sync_obstacle_relax = float(self.get_parameter('sync_obstacle_relax').value)
         self.neighbour_front_angle_deg = float(self.get_parameter('neighbour_front_angle_deg').value)
         self.neighbour_as_obstacle_dist = float(self.get_parameter('neighbour_as_obstacle_distance').value)
+        self.neighbour_body_clearance = float(self.get_parameter('neighbour_body_clearance').value)
         self.neighbour_scan_match_tol = float(self.get_parameter('neighbour_scan_match_tol').value)
         self.neighbour_obstacle_scale = float(self.get_parameter('neighbour_obstacle_scale').value)
+        self.startup_relax_s = float(self.get_parameter('startup_relax_s').value)
         self.progress_timeout_s = float(self.get_parameter('progress_timeout_s').value)
         self.progress_min_delta = float(self.get_parameter('progress_min_delta').value)
         self.desync_duration_s = float(self.get_parameter('desync_duration_s').value)
@@ -512,10 +517,14 @@ class BoidNode(Node):
                     self.neighbour_front_angle_deg = clamp(float(value), 1.0, 90.0)
                 elif name == 'neighbour_as_obstacle_distance':
                     self.neighbour_as_obstacle_dist = max(0.1, float(value))
+                elif name == 'neighbour_body_clearance':
+                    self.neighbour_body_clearance = max(0.0, float(value))
                 elif name == 'neighbour_scan_match_tol':
                     self.neighbour_scan_match_tol = max(0.01, float(value))
                 elif name == 'neighbour_obstacle_scale':
                     self.neighbour_obstacle_scale = clamp(float(value), 0.0, 1.0)
+                elif name == 'startup_relax_s':
+                    self.startup_relax_s = max(0.0, float(value))
                 elif name == 'progress_timeout_s':
                     self.progress_timeout_s = max(0.5, float(value))
                 elif name == 'progress_min_delta':
@@ -656,6 +665,7 @@ class BoidNode(Node):
         my_x, my_y, my_theta = self.my_pose
         my_vx, my_vy = self.my_vel
         now = time.monotonic()
+        startup_phase = (now - self._start_time) < self.startup_relax_s
 
         # Timed recovery mode to break local minima near bottlenecks/walls.
         if now < self._recover_until:
@@ -672,12 +682,15 @@ class BoidNode(Node):
         neighbours = self._get_valid_neighbours(my_x, my_y)
         front_min = self._get_front_min_distance()
         nearest_front_nei = self._nearest_front_neighbour_distance(my_x, my_y, my_theta, neighbours)
-        front_is_neighbour = (
-            math.isfinite(front_min) and
-            math.isfinite(nearest_front_nei) and
-            nearest_front_nei <= self.neighbour_as_obstacle_dist and
-            abs(front_min - nearest_front_nei) <= self.neighbour_scan_match_tol
-        )
+        front_is_neighbour = False
+        if (math.isfinite(front_min) and math.isfinite(nearest_front_nei) and
+                nearest_front_nei <= self.neighbour_as_obstacle_dist):
+            expected_front = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
+            front_is_neighbour = abs(front_min - expected_front) <= self.neighbour_scan_match_tol
+            if (not front_is_neighbour and startup_phase and
+                    front_min <= max(self.front_stop_dist * 1.8, 0.45) and
+                    nearest_front_nei <= self.neighbour_as_obstacle_dist):
+                front_is_neighbour = True
 
         # Step 2: compute each force component (all return unit vectors)
         f_sep = compute_separation(my_x, my_y, neighbours, self.sep_r)
