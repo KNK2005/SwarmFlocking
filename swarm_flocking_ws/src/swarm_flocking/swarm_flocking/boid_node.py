@@ -857,7 +857,8 @@ class BoidNode(Node):
             eff_w_coh = clamp(eff_w_coh * 1.15, self.min_coh_w, self.max_coh_w)
 
         # Detect local progress stalls and temporarily relax sync to unblock.
-        self._update_progress_state(wp_dist, now)
+        speed_mag = math.hypot(my_vx, my_vy)
+        self._update_progress_state(wp_dist, now, speed_mag, front_min, front_is_neighbour)
 
         # Synchronize relative positions/velocity around leader unless obstacle pressure is high.
         f_sync, sync_w = self._compute_sync_force(
@@ -913,7 +914,17 @@ class BoidNode(Node):
                     (1.0 - self.lpf_alpha) * self._smooth_ang)
 
         # Step 6: clamp and publish
-        front_speed_scale = self._compute_front_speed_scale(front_min)
+        effective_front = front_min
+        if front_is_neighbour:
+            # Do not hard-stop on a teammate in front; keep gentle motion to avoid spawn deadlock.
+            gap = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
+            desired_gap = max(0.18, 0.8 * self.front_stop_dist)
+            if gap <= desired_gap:
+                effective_front = max(front_min, self.front_stop_dist + 0.05)
+            else:
+                effective_front = float('inf')
+
+        front_speed_scale = self._compute_front_speed_scale(effective_front)
         lin_cmd = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
         ang_cmd = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
 
@@ -925,7 +936,6 @@ class BoidNode(Node):
             if abs(ang_cmd) < abs(desired_escape):
                 ang_cmd = desired_escape
 
-            speed_mag = math.hypot(self.my_vel[0], self.my_vel[1])
             if self._front_blocked_since is None:
                 self._front_blocked_since = now
             elif ((now - self._front_blocked_since) >= self.stuck_front_time_s and
@@ -1154,7 +1164,14 @@ class BoidNode(Node):
                 nearest = min(nearest, dist)
         return nearest
 
-    def _update_progress_state(self, wp_dist: float, now: float) -> None:
+    def _update_progress_state(
+        self,
+        wp_dist: float,
+        now: float,
+        speed_mag: float,
+        front_min: float,
+        front_is_neighbour: bool,
+    ) -> None:
         """Track progress to waypoint and trigger temporary desync when stalled."""
         if self.current_wp >= len(self.waypoints):
             self._last_wp_dist = None
@@ -1188,7 +1205,19 @@ class BoidNode(Node):
             self._stall_count = 0
             return
 
+        blocked_front = (
+            math.isfinite(front_min) and
+            front_min <= self.front_stop_dist and
+            not front_is_neighbour
+        )
+        moving_enough = speed_mag >= max(0.015, 0.6 * self.stuck_speed_thresh)
+
         if (now - self._last_progress_time) >= self.progress_timeout_s and now >= self._desync_until:
+            if (not blocked_front) and moving_enough:
+                # Robot is still flowing; avoid false positive stall escalation.
+                self._last_progress_time = now
+                return
+
             if self.current_wp == self._stall_wp:
                 self._stall_count += 1
             else:
@@ -1202,7 +1231,8 @@ class BoidNode(Node):
                 self._last_desync_log_time = now
                 self.get_logger().info(
                     f'robot_{self.robot_id} desync assist: stalled at wp={self.current_wp}, '
-                    f'dist={wp_dist:.2f}m, level={self._stall_count}')
+                    f'dist={wp_dist:.2f}m, level={self._stall_count}, '
+                    f'blocked={int(blocked_front)}, speed={speed_mag:.2f}')
 
     def _get_front_min_distance(self) -> float:
         """Return minimum finite front-beam distance within configured FOV."""
