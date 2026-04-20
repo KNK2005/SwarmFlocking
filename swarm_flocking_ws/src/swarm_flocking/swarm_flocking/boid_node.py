@@ -35,7 +35,7 @@ from rclpy.qos import (
     QoSDurabilityPolicy,
 )
 
-from geometry_msgs.msg import Twist, PoseStamped, TwistStamped
+from geometry_msgs.msg import Twist, PoseStamped, TwistStamped, PointStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 
@@ -163,6 +163,8 @@ class BoidNode(Node):
         self._stall_count: int = 0
         self._last_desync_log_time: float = 0.0
         self._progress_wp_idx: int = -1
+        self._monitor_waypoint: Optional[Tuple[float, float]] = None
+        self._monitor_waypoint_ts: float = 0.0
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -194,6 +196,10 @@ class BoidNode(Node):
         self.create_subscription(
             LaserScan, f'{ns}/scan',
             self._scan_callback, SENSOR_QOS)
+
+        self.create_subscription(
+            PointStamped, '/flock/active_waypoint',
+            self._monitor_waypoint_callback, STATE_QOS)
 
         # ----------------------------------------------------------------
         # Subscribers — neighbour state (one per peer)
@@ -318,6 +324,8 @@ class BoidNode(Node):
         self.declare_parameter('desync_migration_boost', 1.4)
         self.declare_parameter('stall_escalation_gain', 0.25)
         self.declare_parameter('desync_log_cooldown_s', 12.0)
+        self.declare_parameter('use_monitor_waypoint', True)
+        self.declare_parameter('monitor_waypoint_timeout_s', 3.0)
 
         # Spawn position offset: Gazebo's odom starts at (0,0) per robot.
         # We add these offsets to convert odom-frame pose to world-frame pose.
@@ -418,6 +426,8 @@ class BoidNode(Node):
         self.desync_migration_boost = float(self.get_parameter('desync_migration_boost').value)
         self.stall_escalation_gain = float(self.get_parameter('stall_escalation_gain').value)
         self.desync_log_cooldown_s = float(self.get_parameter('desync_log_cooldown_s').value)
+        self.use_monitor_waypoint = bool(self.get_parameter('use_monitor_waypoint').value)
+        self.monitor_waypoint_timeout_s = float(self.get_parameter('monitor_waypoint_timeout_s').value)
 
         # Parse flat waypoint list into list of (x, y) tuples
         flat = list(self.get_parameter('waypoints').value)
@@ -599,6 +609,10 @@ class BoidNode(Node):
                     self.stall_escalation_gain = max(0.0, float(value))
                 elif name == 'desync_log_cooldown_s':
                     self.desync_log_cooldown_s = max(0.0, float(value))
+                elif name == 'use_monitor_waypoint':
+                    self.use_monitor_waypoint = bool(value)
+                elif name == 'monitor_waypoint_timeout_s':
+                    self.monitor_waypoint_timeout_s = max(0.1, float(value))
                 elif name == 'waypoints':
                     flat = [float(v) for v in list(value)]
                     if len(flat) % 2 != 0:
@@ -674,6 +688,11 @@ class BoidNode(Node):
         self.neighbour_vels[robot_id] = NeighbourVel(
             msg.twist.linear.x, msg.twist.linear.y)
 
+    def _monitor_waypoint_callback(self, msg: PointStamped) -> None:
+        """Cache monitor-published active waypoint for coordinated migration."""
+        self._monitor_waypoint = (msg.point.x, msg.point.y)
+        self._monitor_waypoint_ts = time.monotonic()
+
     # ====================================================================
     # State broadcasting
     # ====================================================================
@@ -745,6 +764,8 @@ class BoidNode(Node):
 
         # Step 1: collect valid, non-stale neighbours
         neighbours = self._get_valid_neighbours(my_x, my_y)
+        scan_ranges = list(self.latest_scan.ranges) if (self.latest_scan and getattr(self.latest_scan, 'ranges', None)) else []
+        context = self.compute_context(neighbours, scan_ranges)
         front_min = self._get_front_min_distance()
         nearest_front_nei = self._nearest_front_neighbour_distance(my_x, my_y, my_theta, neighbours)
         front_is_neighbour = False
@@ -764,6 +785,11 @@ class BoidNode(Node):
         f_obs = laser_to_repulsive_force(
             self.latest_scan, my_theta, self.obs_thresh)
         f_mig = self._get_migration_force(my_x, my_y)
+        f_sep = (clamp(f_sep[0], -1.0, 1.0), clamp(f_sep[1], -1.0, 1.0))
+        f_ali = (clamp(f_ali[0], -1.0, 1.0), clamp(f_ali[1], -1.0, 1.0))
+        f_coh = (clamp(f_coh[0], -1.0, 1.0), clamp(f_coh[1], -1.0, 1.0))
+        f_obs = (clamp(f_obs[0], -1.0, 1.0), clamp(f_obs[1], -1.0, 1.0))
+        f_mig = (clamp(f_mig[0], -1.0, 1.0), clamp(f_mig[1], -1.0, 1.0))
 
         # ----------------------------------------------------------------
         # Step 3: Adaptive Weight Scaling
@@ -779,6 +805,7 @@ class BoidNode(Node):
         f_wall = (0.0, 0.0)
         sync_w = 0.0
         f_sync = (0.0, 0.0)
+        wall_balance = 0.0
         obstacle_proximity = 0.0
         wp_dist = 0.0
 
@@ -846,8 +873,9 @@ class BoidNode(Node):
                         wall_follow_w = clamp(self.wall_follow_gain * obstacle_proximity, 0.0, self.wall_follow_max_w)
 
         # When far from the active waypoint, increase migration pull to sustain progress.
-        if self.current_wp < len(self.waypoints):
-            gx, gy = self.waypoints[self.current_wp]
+        target_wp = self._get_active_waypoint_target()
+        if target_wp is not None:
+            gx, gy = target_wp
             wp_dist = math.hypot(gx - my_x, gy - my_y)
             eff_w_mig *= clamp(wp_dist / 6.0, 1.0, 1.8)
 
@@ -855,6 +883,31 @@ class BoidNode(Node):
             eff_w_sep *= self.bneck_sep_scale
             eff_w_mig *= self.bneck_mig_boost
             eff_w_coh = clamp(eff_w_coh * 1.15, self.min_coh_w, self.max_coh_w)
+
+        # Context-specific adaptive multipliers (layered over existing base weights).
+        sep_mult = 1.0
+        coh_mult = 1.0
+        mig_mult = 1.0
+        obs_mult = 1.0
+        if context == 'BOTTLENECK':
+            coh_mult = 0.1
+            sep_mult = 2.5
+            mig_mult = 2.0
+            obs_mult = 3.0
+            wall_balance = self.compute_wall_balance_force(scan_ranges)
+        elif context == 'FRAGMENTED':
+            coh_mult = 3.0
+            mig_mult = 0.5
+
+        sep_mult = clamp(sep_mult, 0.0, 4.0)
+        coh_mult = clamp(coh_mult, 0.0, 4.0)
+        mig_mult = clamp(mig_mult, 0.0, 4.0)
+        obs_mult = clamp(obs_mult, 0.0, 4.0)
+
+        eff_w_sep = clamp(eff_w_sep * sep_mult, 0.0, max(0.1, self.max_sep_w * 4.0))
+        eff_w_coh = clamp(eff_w_coh * coh_mult, 0.0, max(0.1, self.max_coh_w * 4.0))
+        eff_w_mig = clamp(eff_w_mig * mig_mult, 0.0, max(0.1, self.w_mig * 6.0))
+        eff_w_obs = clamp(eff_w_obs * obs_mult, 0.0, max(0.1, self.max_obs_w * 4.0))
 
         # Detect local progress stalls and temporarily relax sync to unblock.
         speed_mag = math.hypot(my_vx, my_vy)
@@ -864,6 +917,7 @@ class BoidNode(Node):
         f_sync, sync_w = self._compute_sync_force(
             my_x, my_y, my_theta, my_vx, my_vy, obstacle_proximity, in_bottleneck
         )
+        f_sync = (clamp(f_sync[0], -1.0, 1.0), clamp(f_sync[1], -1.0, 1.0))
         if now < self._desync_until:
             stall_level = min(4, self._stall_count)
             sync_scale = self.desync_sync_scale / (1.0 + 0.2 * stall_level)
@@ -892,8 +946,18 @@ class BoidNode(Node):
               wall_follow_w * f_wall[1] +
               sync_w * f_sync[1])
 
+        if context == 'BOTTLENECK':
+            # Project lateral correction to world frame (+left in robot frame).
+            side_x = -math.sin(my_theta)
+            side_y = math.cos(my_theta)
+            fx += clamp(side_x * wall_balance, -1.0, 1.0)
+            fy += clamp(side_y * wall_balance, -1.0, 1.0)
+
+        fx = clamp(fx, -25.0, 25.0)
+        fy = clamp(fy, -25.0, 25.0)
+
         # Enforce a minimum net component toward waypoint direction.
-        if self.current_wp < len(self.waypoints) and (f_mig[0] != 0.0 or f_mig[1] != 0.0):
+        if target_wp is not None and (f_mig[0] != 0.0 or f_mig[1] != 0.0):
             goal_dot = fx * f_mig[0] + fy * f_mig[1]
             dist_scale = clamp(wp_dist / 5.0, 0.9, 1.8)
             obs_ratio = obstacle_proximity / max(self.goal_proj_obs_relax, 0.05)
@@ -1007,14 +1071,31 @@ class BoidNode(Node):
         self, my_x: float, my_y: float
     ) -> Tuple[float, float]:
         """Return normalised direction toward the current waypoint (or (0,0))."""
-        if self.current_wp >= len(self.waypoints):
+        target_wp = self._get_active_waypoint_target()
+        if target_wp is None:
             # All waypoints reached — no migration force
             return (0.0, 0.0)
-        gx, gy = self.waypoints[self.current_wp]
+        gx, gy = target_wp
         return compute_migration(my_x, my_y, gx, gy)
+
+    def _get_active_waypoint_target(self) -> Optional[Tuple[float, float]]:
+        """Choose monitor-published waypoint when fresh, else fallback to local sequence."""
+        if self.use_monitor_waypoint and self._monitor_waypoint is not None:
+            age = time.monotonic() - self._monitor_waypoint_ts
+            if age <= self.monitor_waypoint_timeout_s:
+                return self._monitor_waypoint
+
+        if self.current_wp >= len(self.waypoints):
+            return None
+        return self.waypoints[self.current_wp]
 
     def _advance_waypoint(self, my_x: float, my_y: float) -> None:
         """Advance the waypoint pointer when the robot arrives close enough."""
+        if self.use_monitor_waypoint and self._monitor_waypoint is not None:
+            age = time.monotonic() - self._monitor_waypoint_ts
+            if age <= self.monitor_waypoint_timeout_s:
+                return
+
         if self.current_wp >= len(self.waypoints):
             return
         gx, gy = self.waypoints[self.current_wp]
@@ -1295,6 +1376,42 @@ class BoidNode(Node):
             1.0,
         )
         return clamp(1.0 - proximity * (1.0 - self.min_front_speed_scale), self.min_front_speed_scale, 1.0)
+
+    def compute_context(self, neighbors, scan_ranges) -> str:
+        """Classify local control context: BOTTLENECK, FRAGMENTED, or OPEN_FIELD."""
+        if not scan_ranges:
+            return 'OPEN_FIELD'
+
+        valid_ranges = [r for r in scan_ranges if math.isfinite(r) and r > 0.0]
+        if not valid_ranges:
+            return 'OPEN_FIELD'
+
+        if min(valid_ranges) < 0.8:
+            return 'BOTTLENECK'
+        if len(neighbors) < 2:
+            return 'FRAGMENTED'
+        return 'OPEN_FIELD'
+
+    def compute_wall_balance_force(self, scan_ranges) -> float:
+        """Compute bounded lateral offset from left/right wall distance mismatch."""
+        if not scan_ranges:
+            return 0.0
+
+        n = len(scan_ranges)
+        left_lo = min(60, n)
+        left_hi = min(121, n)
+        right_lo = min(240, n)
+        right_hi = min(301, n)
+
+        left_vals = [r for r in scan_ranges[left_lo:left_hi] if math.isfinite(r) and r > 0.0]
+        right_vals = [r for r in scan_ranges[right_lo:right_hi] if math.isfinite(r) and r > 0.0]
+        if not left_vals or not right_vals:
+            return 0.0
+
+        left_dist = sum(left_vals) / float(len(left_vals))
+        right_dist = sum(right_vals) / float(len(right_vals))
+        lateral = (left_dist - right_dist) * 0.5
+        return clamp(lateral, -1.0, 1.0)
 
 
 # ---------------------------------------------------------------------------

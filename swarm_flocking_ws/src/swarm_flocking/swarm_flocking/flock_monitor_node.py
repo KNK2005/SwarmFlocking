@@ -24,6 +24,8 @@ import math
 import time
 import csv
 import os
+import re
+import subprocess
 from collections import deque
 from typing import Dict, List, Tuple
 
@@ -66,6 +68,16 @@ SENSOR_QOS = QoSProfile(
     durability=QoSDurabilityPolicy.VOLATILE,
 )
 
+# Placeholder path sequence for bottleneck traversal.
+# NOTE: These coordinates must be adjusted to match the actual world layout.
+WAYPOINTS = [
+    (0.0, 0.0),
+    (-2.0, 0.0),
+    (-4.5, 0.0),
+    (-6.0, 0.0),
+    (-8.5, 2.5),
+]
+
 
 # ---------------------------------------------------------------------------
 # Simple data holders
@@ -94,10 +106,19 @@ class FlockMonitorNode(Node):
         self.declare_parameter('num_robots', 6)
         self.declare_parameter('neighbor_radius', 3.0)
         self.declare_parameter('separation_radius', 0.8)
-        self.declare_parameter('waypoints', [12.0, 1.0, 12.0, 7.0, 12.0, 13.0])
+        default_waypoints = [coord for wp in WAYPOINTS for coord in wp]
+        self.declare_parameter('waypoints', default_waypoints)
         self.declare_parameter('monitor_rate_hz', 2.0)
         self.declare_parameter('rolling_window_s', 10.0)
         self.declare_parameter('goal_tolerance', 1.2)
+        self.declare_parameter('waypoint_reach_radius', 1.5)
+        self.declare_parameter('waypoint_reach_fraction', 0.6)
+        self.declare_parameter('split_recovery_trigger_s', 3.0)
+        self.declare_parameter('split_recovery_duration_s', 5.0)
+        self.declare_parameter('emergency_w_cohesion', 4.0)
+        self.declare_parameter('emergency_w_migration', 0.2)
+        self.declare_parameter('default_w_cohesion_restore', 1.0)
+        self.declare_parameter('default_w_migration_restore', 0.3)
         self.declare_parameter('success_timeout_s', 300.0)
         self.declare_parameter('success_max_collision_rate', 0.20)
         self.declare_parameter('success_max_mean_cohesion', 3.5)
@@ -110,6 +131,14 @@ class FlockMonitorNode(Node):
         self.monitor_rate_hz = max(0.1, float(self.get_parameter('monitor_rate_hz').value))
         self.rolling_window_s = max(1.0, float(self.get_parameter('rolling_window_s').value))
         self.goal_tolerance = max(0.1, float(self.get_parameter('goal_tolerance').value))
+        self.waypoint_reach_radius = max(0.1, float(self.get_parameter('waypoint_reach_radius').value))
+        self.waypoint_reach_fraction = min(1.0, max(0.1, float(self.get_parameter('waypoint_reach_fraction').value)))
+        self.split_recovery_trigger_s = max(0.5, float(self.get_parameter('split_recovery_trigger_s').value))
+        self.split_recovery_duration_s = max(0.5, float(self.get_parameter('split_recovery_duration_s').value))
+        self.emergency_w_cohesion = max(0.0, float(self.get_parameter('emergency_w_cohesion').value))
+        self.emergency_w_migration = max(0.0, float(self.get_parameter('emergency_w_migration').value))
+        self.default_w_cohesion_restore = max(0.0, float(self.get_parameter('default_w_cohesion_restore').value))
+        self.default_w_migration_restore = max(0.0, float(self.get_parameter('default_w_migration_restore').value))
         self.success_timeout_s = max(1.0, float(self.get_parameter('success_timeout_s').value))
         self.success_max_collision_rate = max(0.0, float(self.get_parameter('success_max_collision_rate').value))
         self.success_max_mean_cohesion = max(0.0, float(self.get_parameter('success_max_mean_cohesion').value))
@@ -122,6 +151,8 @@ class FlockMonitorNode(Node):
             flat = flat[:-1]
         self.waypoints = [(flat[k], flat[k+1]) for k in range(0, len(flat), 2)]
         self.final_waypoint = self.waypoints[-1] if self.waypoints else None
+        self.current_waypoint_index = 0
+        self.waypoints_completed = 0
 
         # ------- Goal/Metrics tracking state -------
         self.start_time = None
@@ -133,6 +164,13 @@ class FlockMonitorNode(Node):
         self.completion_reason = 'running'
         self._shutdown_timer = None
         self._last_log_time = 0.0
+        self.split_timer = 0.0
+        self.split_events_count = 0
+        self._split_started_at = None
+        self._emergency_active = False
+        self._emergency_restore_at = 0.0
+        self._emergency_original_weights: Dict[int, Tuple[float, float]] = {}
+        self._boid_node_name_cache: Dict[int, str] = {}
 
         # Rolling metric windows
         self._collision_events_window: deque = deque()
@@ -171,6 +209,8 @@ class FlockMonitorNode(Node):
             MarkerArray, '/flock/neighbor_links', 10)
         self.state_pub = self.create_publisher(
             FlockState, '/flock/state', 10)
+        self.active_waypoint_pub = self.create_publisher(
+            PointStamped, '/flock/active_waypoint', 10)
 
         # Command publishers for safe termination
         self.cmd_pubs = {}
@@ -285,9 +325,51 @@ class FlockMonitorNode(Node):
         # ------------------------------------------------------------------
         num_subgroups, is_split = self._detect_split(active_ids)
 
+        if is_split:
+            if self._split_started_at is None:
+                self._split_started_at = now
+            self.split_timer = now - self._split_started_at
+            if self.split_timer >= self.split_recovery_trigger_s and not self._emergency_active:
+                self.broadcast_emergency_cohesion(active_ids)
+        else:
+            self._split_started_at = None
+            self.split_timer = 0.0
+
+        if self._emergency_active and now >= self._emergency_restore_at:
+            self._restore_emergency_cohesion(active_ids)
+
+        active_wp = self._get_active_waypoint()
+        if active_wp is not None:
+            near_count = sum(
+                1
+                for rid in active_ids
+                if math.hypot(self.robot_states[rid].x - active_wp[0], self.robot_states[rid].y - active_wp[1])
+                <= self.waypoint_reach_radius
+            )
+            required = max(1, int(math.ceil(self.waypoint_reach_fraction * self.num_robots)))
+            if self.current_waypoint_index < max(0, len(self.waypoints) - 1) and near_count >= required:
+                self.current_waypoint_index += 1
+                self.waypoints_completed = max(self.waypoints_completed, self.current_waypoint_index)
+                active_wp = self._get_active_waypoint()
+                if active_wp is not None:
+                    self.get_logger().info(
+                        f'Advanced to waypoint {self.current_waypoint_index}/{len(self.waypoints)-1}: '
+                        f'({active_wp[0]:.2f}, {active_wp[1]:.2f})'
+                    )
+
+        if active_wp is not None:
+            wp_msg = PointStamped()
+            wp_msg.header.stamp = stamp
+            wp_msg.header.frame_id = 'map'
+            wp_msg.point.x = float(active_wp[0])
+            wp_msg.point.y = float(active_wp[1])
+            wp_msg.point.z = 0.0
+            self.active_waypoint_pub.publish(wp_msg)
+
         # Goal completion check (computed early so it can be published in state_msg)
         all_reached_goal = False
-        if self.final_waypoint is not None and num_active == self.num_robots:
+        at_final_waypoint = self.current_waypoint_index >= max(0, len(self.waypoints) - 1)
+        if at_final_waypoint and self.final_waypoint is not None and num_active == self.num_robots:
             gx, gy = self.final_waypoint
             all_reached_goal = all(
                 math.hypot(self.robot_states[rid].x - gx, self.robot_states[rid].y - gy) < self.goal_tolerance
@@ -364,7 +446,8 @@ class FlockMonitorNode(Node):
             self.get_logger().info(
                 f'active={num_active}/{self.num_robots} split={is_split} groups={num_subgroups} '
                 f'cohesion={cohesion_radius:.2f}m rolling_collision_rate={collision_rate:.3f}/s '
-                f't={elapsed_time:.1f}s'
+                f'wp={self.current_waypoint_index}/{max(0, len(self.waypoints)-1)} '
+                f'split_t={self.split_timer:.1f}s t={elapsed_time:.1f}s'
             )
 
         if all_reached_goal:
@@ -414,6 +497,118 @@ class FlockMonitorNode(Node):
             return 0.0
         return float(sum(v for _, v in self._cohesion_window) / len(self._cohesion_window))
 
+    def _get_active_waypoint(self):
+        if not self.waypoints:
+            return None
+        idx = max(0, min(self.current_waypoint_index, len(self.waypoints) - 1))
+        return self.waypoints[idx]
+
+    def _candidate_boid_node_names(self, rid: int) -> List[str]:
+        return [
+            f'/robot_{rid}/boid_{rid}',
+            f'/robot_{rid}/boid_node',
+            f'/boid_{rid}',
+            f'/boid_node_{rid}',
+            f'/boid_node',
+        ]
+
+    def _ros2_param_get_float(self, node_name: str, param_name: str):
+        try:
+            result = subprocess.run(
+                ['ros2', 'param', 'get', node_name, param_name],
+                capture_output=True,
+                text=True,
+                timeout=1.2,
+                check=False,
+            )
+            if result.returncode != 0:
+                return None
+            text = f'{result.stdout}\n{result.stderr}'
+            m = re.search(r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', text)
+            if m is None:
+                return None
+            return float(m.group(1))
+        except Exception:
+            return None
+
+    def _ros2_param_set(self, node_name: str, param_name: str, value: float) -> bool:
+        try:
+            result = subprocess.run(
+                ['ros2', 'param', 'set', node_name, param_name, str(value)],
+                capture_output=True,
+                text=True,
+                timeout=1.2,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _resolve_boid_node_name(self, rid: int) -> str:
+        cached = self._boid_node_name_cache.get(rid)
+        if cached:
+            return cached
+
+        for name in self._candidate_boid_node_names(rid):
+            probe = self._ros2_param_get_float(name, 'w_cohesion')
+            if probe is not None:
+                self._boid_node_name_cache[rid] = name
+                return name
+
+        return ''
+
+    def broadcast_emergency_cohesion(self, active_ids: List[int]) -> None:
+        """Temporarily enforce high cohesion/low migration when split persists."""
+        if self._emergency_active:
+            return
+
+        self._emergency_original_weights = {}
+        for rid in active_ids:
+            node_name = self._resolve_boid_node_name(rid)
+            if not node_name:
+                continue
+
+            orig_coh = self._ros2_param_get_float(node_name, 'w_cohesion')
+            orig_mig = self._ros2_param_get_float(node_name, 'w_migration')
+            if orig_coh is None:
+                orig_coh = self.default_w_cohesion_restore
+            if orig_mig is None:
+                orig_mig = self.default_w_migration_restore
+            self._emergency_original_weights[rid] = (orig_coh, orig_mig)
+
+            self._ros2_param_set(node_name, 'w_cohesion', self.emergency_w_cohesion)
+            self._ros2_param_set(node_name, 'w_migration', self.emergency_w_migration)
+
+        self._emergency_active = True
+        self._emergency_restore_at = time.monotonic() + self.split_recovery_duration_s
+        self.split_events_count += 1
+        self.get_logger().warn(
+            f'Split persisted for {self.split_timer:.1f}s. Emergency cohesion broadcast applied '
+            f'(event={self.split_events_count}).'
+        )
+
+    def _restore_emergency_cohesion(self, active_ids: List[int]) -> None:
+        if not self._emergency_active:
+            return
+
+        restore_ids = sorted(set(active_ids) | set(self._emergency_original_weights.keys()))
+        for rid in restore_ids:
+            node_name = self._resolve_boid_node_name(rid)
+            if not node_name:
+                continue
+
+            orig_coh, orig_mig = self._emergency_original_weights.get(
+                rid,
+                (self.default_w_cohesion_restore, self.default_w_migration_restore),
+            )
+            self._ros2_param_set(node_name, 'w_cohesion', orig_coh)
+            self._ros2_param_set(node_name, 'w_migration', orig_mig)
+
+        self._emergency_active = False
+        self._emergency_restore_at = 0.0
+        self._emergency_original_weights = {}
+        self.get_logger().info('Restored boid weights after emergency cohesion window.')
+
     def _finalize_experiment(
         self,
         success: bool,
@@ -452,11 +647,13 @@ class FlockMonitorNode(Node):
                 if not file_exists:
                     writer.writerow([
                         'num_robots',
+                        'total_time_s',
+                        'collision_rate_per_s',
+                        'mean_cohesion_radius_m',
+                        'waypoints_completed',
+                        'split_events_count',
                         'status',
                         'reason',
-                        'completion_time',
-                        'collision_rate',
-                        'mean_cohesion',
                         'total_collisions',
                         'success_timeout_s',
                         'success_max_collision_rate',
@@ -464,11 +661,13 @@ class FlockMonitorNode(Node):
                     ])
                 writer.writerow([
                     self.num_robots,
-                    'success' if success else 'failure',
-                    reason,
                     round(elapsed_time, 3),
                     round(collision_rate, 4),
                     round(mean_cohesion, 4),
+                    int(self.waypoints_completed),
+                    int(self.split_events_count),
+                    'success' if success else 'failure',
+                    reason,
                     self._cumulative_collisions,
                     round(self.success_timeout_s, 3),
                     round(self.success_max_collision_rate, 4),
