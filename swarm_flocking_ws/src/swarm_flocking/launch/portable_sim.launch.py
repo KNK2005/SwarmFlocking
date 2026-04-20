@@ -38,8 +38,23 @@ def generate_launch_description():
             'gazebo_flavor', default_value='auto',
             description='Gazebo backend flavor: auto, harmonic, or classic'),
         DeclareLaunchArgument(
-            'odom_is_local', default_value='true',
+            'odom_is_local', default_value='false',
             description='When using Harmonic, interpret odom as local and apply spawn offsets'),
+        DeclareLaunchArgument(
+            'spawn_origin_x', default_value='4.0',
+            description='Spawn grid origin X used by Harmonic backend'),
+        DeclareLaunchArgument(
+            'spawn_origin_y', default_value='6.0',
+            description='Spawn grid origin Y used by Harmonic backend'),
+        DeclareLaunchArgument(
+            'spawn_spacing_x', default_value='1.0',
+            description='Spawn grid spacing in X used by Harmonic backend'),
+        DeclareLaunchArgument(
+            'spawn_spacing_y', default_value='1.0',
+            description='Spawn grid spacing in Y used by Harmonic backend'),
+        DeclareLaunchArgument(
+            'spawn_columns', default_value='3',
+            description='Spawn grid columns used by Harmonic backend'),
         DeclareLaunchArgument(
             'dt', default_value='0.1',
             description='Physics timestep for headless backend'),
@@ -56,7 +71,7 @@ def generate_launch_description():
             'auto_shutdown_on_completion', default_value='true',
             description='Auto-stop nodes when monitor completes'),
         DeclareLaunchArgument(
-            'waypoints', default_value='[5.5, 6.0, 8.5, 7.2, 11.5, 8.5, 14.5, 9.3, 17.0, 10.0]',
+            'waypoints', default_value='[6.0, 6.5, 9.0, 7.6, 12.0, 8.6, 15.0, 9.4, 17.0, 10.0]',
             description='Flat waypoint list [x0,y0,x1,y1,...] for headless backend'),
         DeclareLaunchArgument(
             'spawn_coords',
@@ -128,11 +143,16 @@ def _dispatch_backend(context, *args, **kwargs):
                         'world_name': context.launch_configurations.get('world_name', 'open_field'),
                         # Harmonic can run without bridged /clock; keep ROS timers alive.
                         'use_sim_time': 'false',
-                        'odom_is_local': context.launch_configurations.get('odom_is_local', 'true'),
+                        'odom_is_local': context.launch_configurations.get('odom_is_local', 'false'),
                         'headless': context.launch_configurations.get('headless', 'true'),
                         'enable_rviz': context.launch_configurations.get('enable_rviz', 'false'),
                         'enable_obstacle_avoidance': context.launch_configurations.get('enable_obstacle_avoidance', 'false'),
                         'waypoints': context.launch_configurations.get('waypoints', ''),
+                        'spawn_origin_x': context.launch_configurations.get('spawn_origin_x', '4.0'),
+                        'spawn_origin_y': context.launch_configurations.get('spawn_origin_y', '6.0'),
+                        'spawn_spacing_x': context.launch_configurations.get('spawn_spacing_x', '1.0'),
+                        'spawn_spacing_y': context.launch_configurations.get('spawn_spacing_y', '1.0'),
+                        'spawn_columns': context.launch_configurations.get('spawn_columns', '3'),
                     }.items(),
                 ),
             ]

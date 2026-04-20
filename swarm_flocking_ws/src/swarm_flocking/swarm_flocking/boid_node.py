@@ -167,6 +167,7 @@ class BoidNode(Node):
         self._monitor_waypoint_ts: float = 0.0
         self.smooth_w_cohesion: float = self.w_coh
         self.smooth_w_separation: float = self.w_sep
+        self._odom_mode_local_effective: Optional[bool] = None
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -344,6 +345,7 @@ class BoidNode(Node):
         # If true, /odom starts at (0,0) in robot-local frame and needs
         # (spawn_x, spawn_y) offset. If false, /odom is already world-frame.
         self.declare_parameter('odom_is_local', True)
+        self.declare_parameter('auto_detect_odom_frame', True)
         # Waypoints stored as a flat list: [x0, y0, x1, y1, ...]
         self.declare_parameter('waypoints', [12.0, 1.0, 12.0, 7.0, 12.0, 13.0])
 
@@ -368,6 +370,7 @@ class BoidNode(Node):
         self.spawn_x      = float(self.get_parameter('spawn_x').value)
         self.spawn_y      = float(self.get_parameter('spawn_y').value)
         self.odom_is_local = bool(self.get_parameter('odom_is_local').value)
+        self.auto_detect_odom_frame = bool(self.get_parameter('auto_detect_odom_frame').value)
 
         # Adaptive scaling parameters
         self.k_sep         = float(self.get_parameter('k_sep').value)
@@ -661,6 +664,10 @@ class BoidNode(Node):
                         self.current_wp = max(0, len(self.waypoints) - 1)
                 elif name == 'odom_is_local':
                     self.odom_is_local = bool(value)
+                    self._odom_mode_local_effective = None
+                elif name == 'auto_detect_odom_frame':
+                    self.auto_detect_odom_frame = bool(value)
+                    self._odom_mode_local_effective = None
 
             return SetParametersResult(successful=True)
         except Exception as exc:
@@ -683,7 +690,28 @@ class BoidNode(Node):
         ori = msg.pose.pose.orientation
         theta = yaw_from_quaternion(ori)
 
-        if self.odom_is_local:
+        if self._odom_mode_local_effective is None:
+            mode_local = self.odom_is_local
+            if self.auto_detect_odom_frame:
+                dist_to_spawn = math.hypot(pos.x - self.spawn_x, pos.y - self.spawn_y)
+                dist_to_origin = math.hypot(pos.x, pos.y)
+                spawn_norm = math.hypot(self.spawn_x, self.spawn_y)
+
+                # If odom already matches world spawn coordinates, avoid double-offsetting.
+                if dist_to_spawn <= 0.8 and spawn_norm > 1.0:
+                    mode_local = False
+                # If odom starts near origin while spawn is not near origin, offset is required.
+                elif dist_to_origin <= 0.8 and spawn_norm > 1.0:
+                    mode_local = True
+
+            self._odom_mode_local_effective = mode_local
+            mode_text = 'local+offset' if mode_local else 'world'
+            self.get_logger().info(
+                f'robot_{self.robot_id} odom frame resolved as {mode_text} '
+                f'(configured odom_is_local={self.odom_is_local}, auto_detect={self.auto_detect_odom_frame})'
+            )
+
+        if self._odom_mode_local_effective:
             # Convert odom-local -> world-frame by adding spawn offset.
             world_x = pos.x + self.spawn_x
             world_y = pos.y + self.spawn_y

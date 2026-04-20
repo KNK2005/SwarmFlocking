@@ -49,15 +49,25 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
       'use_sim_time', default_value='false', description='Use simulation clock')
     odom_is_local_arg = DeclareLaunchArgument(
-        'odom_is_local', default_value='true',
+        'odom_is_local', default_value='false',
         description='If true, add spawn offsets to per-robot local odom before flocking')
     world_name_arg = DeclareLaunchArgument(
       'world_name', default_value='open_field', description='World basename from swarm_flocking_gazebo/worlds')
     waypoints_arg = DeclareLaunchArgument(
       'waypoints',
-      default_value='[5.5, 6.0, 8.5, 7.2, 11.5, 8.5, 14.5, 9.3, 17.0, 10.0]',
+      default_value='[6.0, 6.5, 9.0, 7.6, 12.0, 8.6, 15.0, 9.4, 17.0, 10.0]',
       description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor',
     )
+    spawn_origin_x_arg = DeclareLaunchArgument(
+      'spawn_origin_x', default_value='4.0', description='Spawn grid origin X in world frame')
+    spawn_origin_y_arg = DeclareLaunchArgument(
+      'spawn_origin_y', default_value='6.0', description='Spawn grid origin Y in world frame')
+    spawn_spacing_x_arg = DeclareLaunchArgument(
+      'spawn_spacing_x', default_value='1.0', description='Spawn grid spacing along X')
+    spawn_spacing_y_arg = DeclareLaunchArgument(
+      'spawn_spacing_y', default_value='1.0', description='Spawn grid spacing along Y')
+    spawn_columns_arg = DeclareLaunchArgument(
+      'spawn_columns', default_value='3', description='Spawn grid column count')
     headless_arg = DeclareLaunchArgument(
       'headless', default_value='true', description='Run Gazebo server only (no GUI window)')
     enable_rviz_arg = DeclareLaunchArgument(
@@ -122,6 +132,11 @@ def generate_launch_description():
         odom_is_local_arg,
         world_name_arg,
         waypoints_arg,
+        spawn_origin_x_arg,
+        spawn_origin_y_arg,
+        spawn_spacing_x_arg,
+        spawn_spacing_y_arg,
+        spawn_columns_arg,
         headless_arg,
         enable_rviz_arg,
         enable_obstacle_avoidance_arg,
@@ -155,8 +170,11 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     odom_is_local = context.launch_configurations.get('odom_is_local', 'true').lower() == 'true'
     enable_obstacle_avoidance = context.launch_configurations.get('enable_obstacle_avoidance', 'false').lower() == 'true'
     waypoints = _parse_float_list(context.launch_configurations.get('waypoints', ''))
-    start_x, start_y = 2.0, 4.5
-    spacing = 0.7
+    start_x = float(context.launch_configurations.get('spawn_origin_x', '4.0'))
+    start_y = float(context.launch_configurations.get('spawn_origin_y', '6.0'))
+    spacing_x = float(context.launch_configurations.get('spawn_spacing_x', '1.0'))
+    spacing_y = float(context.launch_configurations.get('spawn_spacing_y', '1.0'))
+    spawn_cols = max(1, int(context.launch_configurations.get('spawn_columns', '3')))
 
     actions = [
       # RViz often uses map as fixed frame while Gazebo odom streams are in odom.
@@ -221,10 +239,10 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     BOID_DELAY_AFTER_SPAWN = 2.5
 
     for i in range(num_robots):
-        row = i // 3
-        col = i % 3
-        x = start_x + col * spacing
-        y = start_y + row * spacing
+      row = i // spawn_cols
+      col = i % spawn_cols
+      x = start_x + col * spacing_x
+      y = start_y + row * spacing_y
         ns = f'robot_{i}'
 
         sdf_path = os.path.join(tmp_dir, f'{ns}.sdf')
@@ -256,27 +274,41 @@ def _spawn_all_harmonic(context, *args, **kwargs):
         boid_action = TimerAction(
             period=float(boid_time),
             actions=[
-                RosNode(
-                    package='swarm_flocking',
-                    executable='boid_node',
-                    name=f'boid_{i}',
-                    namespace=ns,
-                    parameters=[
-                        params_file,
-                        {
-                            'robot_id': i,
-                            'num_robots': num_robots,
-                            'spawn_x': x,
-                            'spawn_y': y,
-                            'odom_is_local': odom_is_local,
-                            'use_monitor_waypoint': True,
-                            'enable_obstacle_avoidance': enable_obstacle_avoidance,
-                            'waypoints': waypoints,
-                            'use_sim_time': use_sim_time == 'true',
-                        },
-                    ],
-                    output='screen',
-                ),
+            RosNode(
+              package='swarm_flocking',
+              executable='boid_node',
+              name=f'boid_{i}',
+              namespace=ns,
+              parameters=[
+                params_file,
+                {
+                  'robot_id': i,
+                  'num_robots': num_robots,
+                  'spawn_x': x,
+                  'spawn_y': y,
+                  'odom_is_local': odom_is_local,
+                  'auto_detect_odom_frame': True,
+                  'use_monitor_waypoint': True,
+                  'enable_obstacle_avoidance': enable_obstacle_avoidance,
+                  'waypoints': waypoints,
+                  'use_sim_time': use_sim_time == 'true',
+                  'bottleneck_mode_enable': enable_obstacle_avoidance,
+                  'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
+                  'waypoint_sync_fraction': 0.15 if not enable_obstacle_avoidance else 0.30,
+                  'w_separation': 0.45 if not enable_obstacle_avoidance else 1.0,
+                  'w_alignment': 1.9 if not enable_obstacle_avoidance else 1.4,
+                  'w_cohesion': 2.4 if not enable_obstacle_avoidance else 1.6,
+                  'w_migration': 1.15 if not enable_obstacle_avoidance else 0.68,
+                  'sync_position_gain': 2.1 if not enable_obstacle_avoidance else 1.15,
+                  'sync_velocity_gain': 0.75 if not enable_obstacle_avoidance else 0.5,
+                  'sync_max_w': 3.0 if not enable_obstacle_avoidance else 2.0,
+                  'progress_timeout_s': 8.0 if not enable_obstacle_avoidance else 5.0,
+                  'regroup_gain': 1.2 if not enable_obstacle_avoidance else 0.8,
+                  'max_regroup_w': 2.8 if not enable_obstacle_avoidance else 2.0,
+                },
+              ],
+              output='screen',
+            ),
             ],
         )
 
@@ -292,6 +324,11 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                 'num_robots': num_robots,
                 'waypoints': waypoints,
                 'use_sim_time': use_sim_time == 'true',
+              'waypoint_bottleneck_guard_enable': enable_obstacle_avoidance,
+              'waypoint_reach_fraction': 0.50 if not enable_obstacle_avoidance else 0.60,
+              'waypoint_reach_radius': 1.9 if not enable_obstacle_avoidance else 1.5,
+              'goal_tolerance': 1.6 if not enable_obstacle_avoidance else 1.2,
+              'timeout_progress_grace_s': 300.0 if not enable_obstacle_avoidance else 240.0,
             },
         ],
         output='screen',
