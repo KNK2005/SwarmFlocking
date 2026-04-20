@@ -248,6 +248,7 @@ class BoidNode(Node):
         self.declare_parameter('w_alignment',        1.0)
         self.declare_parameter('w_cohesion',         1.0)
         self.declare_parameter('w_obstacle',         2.5)
+        self.declare_parameter('enable_obstacle_avoidance', True)
         self.declare_parameter('w_migration',        0.3)
         self.declare_parameter('neighbor_radius',    3.0)
         self.declare_parameter('separation_radius',  0.8)
@@ -354,6 +355,7 @@ class BoidNode(Node):
         self.w_ali     = float(self.get_parameter('w_alignment').value)
         self.w_coh     = float(self.get_parameter('w_cohesion').value)
         self.w_obs     = float(self.get_parameter('w_obstacle').value)
+        self.enable_obstacle_avoidance = bool(self.get_parameter('enable_obstacle_avoidance').value)
         self.w_mig     = float(self.get_parameter('w_migration').value)
         self.neighbour_r  = float(self.get_parameter('neighbor_radius').value)
         self.sep_r        = float(self.get_parameter('separation_radius').value)
@@ -473,6 +475,8 @@ class BoidNode(Node):
                     self.w_coh = float(value)
                 elif name == 'w_obstacle':
                     self.w_obs = float(value)
+                elif name == 'enable_obstacle_avoidance':
+                    self.enable_obstacle_avoidance = bool(value)
                 elif name == 'w_migration':
                     self.w_mig = float(value)
                 elif name == 'neighbor_radius':
@@ -778,6 +782,7 @@ class BoidNode(Node):
         my_x, my_y, my_theta = self.my_pose
         my_vx, my_vy = self.my_vel
         now = time.monotonic()
+        obstacle_avoidance_enabled = self.enable_obstacle_avoidance
         startup_phase = (now - self._start_time) < self.startup_relax_s
         in_bottleneck = self._in_bottleneck_zone(my_x, my_y)
 
@@ -794,26 +799,32 @@ class BoidNode(Node):
 
         # Step 1: collect valid, non-stale neighbours
         neighbours = self._get_valid_neighbours(my_x, my_y)
-        scan_ranges = list(self.latest_scan.ranges) if (self.latest_scan and getattr(self.latest_scan, 'ranges', None)) else []
+        scan_ranges = []
+        if obstacle_avoidance_enabled and self.latest_scan and getattr(self.latest_scan, 'ranges', None):
+            scan_ranges = list(self.latest_scan.ranges)
         context = self.compute_context(neighbours, scan_ranges)
-        front_min = self._get_front_min_distance()
-        nearest_front_nei = self._nearest_front_neighbour_distance(my_x, my_y, my_theta, neighbours)
+        front_min = float('inf')
+        nearest_front_nei = float('inf')
         front_is_neighbour = False
-        if (math.isfinite(front_min) and math.isfinite(nearest_front_nei) and
-                nearest_front_nei <= self.neighbour_as_obstacle_dist):
-            expected_front = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
-            front_is_neighbour = abs(front_min - expected_front) <= self.neighbour_scan_match_tol
-            if (not front_is_neighbour and startup_phase and
-                    front_min <= max(self.front_stop_dist * 1.8, 0.45) and
+        if obstacle_avoidance_enabled:
+            front_min = self._get_front_min_distance()
+            nearest_front_nei = self._nearest_front_neighbour_distance(my_x, my_y, my_theta, neighbours)
+            if (math.isfinite(front_min) and math.isfinite(nearest_front_nei) and
                     nearest_front_nei <= self.neighbour_as_obstacle_dist):
-                front_is_neighbour = True
+                expected_front = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
+                front_is_neighbour = abs(front_min - expected_front) <= self.neighbour_scan_match_tol
+                if (not front_is_neighbour and startup_phase and
+                        front_min <= max(self.front_stop_dist * 1.8, 0.45) and
+                        nearest_front_nei <= self.neighbour_as_obstacle_dist):
+                    front_is_neighbour = True
 
         # Step 2: compute each force component (all return unit vectors)
         f_sep = compute_separation(my_x, my_y, neighbours, self.sep_r)
         f_ali = compute_alignment(my_vx, my_vy, neighbours)
         f_coh = compute_cohesion(my_x, my_y, neighbours)
-        f_obs = laser_to_repulsive_force(
-            self.latest_scan, my_theta, self.obs_thresh)
+        f_obs = (0.0, 0.0)
+        if obstacle_avoidance_enabled:
+            f_obs = laser_to_repulsive_force(self.latest_scan, my_theta, self.obs_thresh)
         f_mig = self._get_migration_force(my_x, my_y)
         f_sep = (clamp(f_sep[0], -1.0, 1.0), clamp(f_sep[1], -1.0, 1.0))
         f_ali = (clamp(f_ali[0], -1.0, 1.0), clamp(f_ali[1], -1.0, 1.0))
@@ -866,7 +877,7 @@ class BoidNode(Node):
                 eff_w_sep *= sep_soften
 
         # 3. Threat-Proximity Response (Safe Obstacle Scaling)
-        if self.latest_scan and getattr(self.latest_scan, 'ranges', None):
+        if obstacle_avoidance_enabled and self.latest_scan and getattr(self.latest_scan, 'ranges', None):
             valid_ranges = [r for r in self.latest_scan.ranges if math.isfinite(r) and r > 0.0]
             if valid_ranges:
                 min_laser_dist = min(valid_ranges)
@@ -1021,45 +1032,50 @@ class BoidNode(Node):
                     (1.0 - self.lpf_alpha) * self._smooth_ang)
 
         # Step 6: clamp and publish
-        effective_front = front_min
-        if front_is_neighbour:
-            # Do not hard-stop on a teammate in front; keep gentle motion to avoid spawn deadlock.
-            gap = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
-            desired_gap = max(0.18, 0.8 * self.front_stop_dist)
-            if gap <= desired_gap:
-                effective_front = max(front_min, self.front_stop_dist + 0.05)
-            else:
-                effective_front = float('inf')
-
-        front_speed_scale = self._compute_front_speed_scale(effective_front)
-        lin_cmd = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
+        lin_cmd = clamp(self._smooth_lin, -self.max_lin, self.max_lin)
         ang_cmd = clamp(self._smooth_ang, -self.max_ang, self.max_ang)
 
-        # Hard safety near walls: stop forward motion and force turn toward freer side.
-        if math.isfinite(front_min) and front_min <= self.front_stop_dist and not front_is_neighbour:
-            lin_cmd = min(0.0, lin_cmd)
-            turn_dir = self._compute_escape_turn_direction()
-            desired_escape = turn_dir * self.escape_turn_rate
-            if abs(ang_cmd) < abs(desired_escape):
-                ang_cmd = desired_escape
+        if obstacle_avoidance_enabled:
+            effective_front = front_min
+            if front_is_neighbour:
+                # Do not hard-stop on a teammate in front; keep gentle motion to avoid spawn deadlock.
+                gap = max(0.0, nearest_front_nei - self.neighbour_body_clearance)
+                desired_gap = max(0.18, 0.8 * self.front_stop_dist)
+                if gap <= desired_gap:
+                    effective_front = max(front_min, self.front_stop_dist + 0.05)
+                else:
+                    effective_front = float('inf')
 
-            if self._front_blocked_since is None:
-                self._front_blocked_since = now
-            elif ((now - self._front_blocked_since) >= self.stuck_front_time_s and
-                  speed_mag <= self.stuck_speed_thresh):
-                self._recover_turn_dir = turn_dir
-                self._recover_until = now + self.recover_duration_s
+            front_speed_scale = self._compute_front_speed_scale(effective_front)
+            lin_cmd = clamp(self._smooth_lin * front_speed_scale, -self.max_lin, self.max_lin)
+
+            # Hard safety near walls: stop forward motion and force turn toward freer side.
+            if math.isfinite(front_min) and front_min <= self.front_stop_dist and not front_is_neighbour:
+                lin_cmd = min(0.0, lin_cmd)
+                turn_dir = self._compute_escape_turn_direction()
+                desired_escape = turn_dir * self.escape_turn_rate
+                if abs(ang_cmd) < abs(desired_escape):
+                    ang_cmd = desired_escape
+
+                if self._front_blocked_since is None:
+                    self._front_blocked_since = now
+                elif ((now - self._front_blocked_since) >= self.stuck_front_time_s and
+                      speed_mag <= self.stuck_speed_thresh):
+                    self._recover_turn_dir = turn_dir
+                    self._recover_until = now + self.recover_duration_s
+                    self._front_blocked_since = None
+                    self.get_logger().info(
+                        f'robot_{self.robot_id} recovery: blocked front={front_min:.2f}m, speed={speed_mag:.2f}m/s')
+                    cmd = Twist()
+                    cmd.linear.x = -min(self.recover_reverse_speed, self.max_lin)
+                    cmd.angular.z = clamp(self._recover_turn_dir * self.recover_turn_rate, -self.max_ang, self.max_ang)
+                    self._smooth_lin = 0.0
+                    self._smooth_ang = cmd.angular.z
+                    self.cmd_pub.publish(cmd)
+                    self._advance_waypoint(my_x, my_y)
+                    return
+            else:
                 self._front_blocked_since = None
-                self.get_logger().info(
-                    f'robot_{self.robot_id} recovery: blocked front={front_min:.2f}m, speed={speed_mag:.2f}m/s')
-                cmd = Twist()
-                cmd.linear.x = -min(self.recover_reverse_speed, self.max_lin)
-                cmd.angular.z = clamp(self._recover_turn_dir * self.recover_turn_rate, -self.max_ang, self.max_ang)
-                self._smooth_lin = 0.0
-                self._smooth_ang = cmd.angular.z
-                self.cmd_pub.publish(cmd)
-                self._advance_waypoint(my_x, my_y)
-                return
         else:
             self._front_blocked_since = None
 

@@ -12,6 +12,7 @@ Starts:
 
 import os
 import tempfile
+import ast
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -19,6 +20,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 
 
@@ -50,7 +52,19 @@ def generate_launch_description():
         'odom_is_local', default_value='true',
         description='If true, add spawn offsets to per-robot local odom before flocking')
     world_name_arg = DeclareLaunchArgument(
-        'world_name', default_value='obstacle_course', description='World basename from swarm_flocking_gazebo/worlds')
+      'world_name', default_value='open_field', description='World basename from swarm_flocking_gazebo/worlds')
+    waypoints_arg = DeclareLaunchArgument(
+      'waypoints',
+      default_value='[5.5, 6.0, 8.5, 7.2, 11.5, 8.5, 14.5, 9.3, 17.0, 10.0]',
+      description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor',
+    )
+    headless_arg = DeclareLaunchArgument(
+      'headless', default_value='true', description='Run Gazebo server only (no GUI window)')
+    enable_rviz_arg = DeclareLaunchArgument(
+      'enable_rviz', default_value='false', description='Launch RViz viewer')
+    enable_obstacle_avoidance_arg = DeclareLaunchArgument(
+      'enable_obstacle_avoidance', default_value='false',
+      description='Enable boid obstacle avoidance and lidar safety logic')
 
     # Harmonic uses GZ_SIM_RESOURCE_PATH for resolving model:// resources.
     gz_resource_path = SetEnvironmentVariable(
@@ -64,12 +78,23 @@ def generate_launch_description():
         os.path.join(pkg_gazebo, 'models') + ':' + os.environ.get('IGN_GAZEBO_RESOURCE_PATH', ''),
     )
 
-    gz_sim_launch = IncludeLaunchDescription(
+    gz_sim_headless_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_ros_gz_sim, 'launch', 'gz_sim.launch.py')
         ),
+      condition=IfCondition(LaunchConfiguration('headless')),
         launch_arguments={
-            'gz_args': ['-r ', world_file],
+        'gz_args': ['-r -s ', world_file],
+      }.items(),
+    )
+
+    gz_sim_gui_launch = IncludeLaunchDescription(
+      PythonLaunchDescriptionSource(
+        os.path.join(pkg_ros_gz_sim, 'launch', 'gz_sim.launch.py')
+      ),
+      condition=UnlessCondition(LaunchConfiguration('headless')),
+      launch_arguments={
+        'gz_args': ['-r ', world_file],
         }.items(),
     )
 
@@ -79,6 +104,7 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz2',
+      condition=IfCondition(LaunchConfiguration('enable_rviz')),
         arguments=['-d', rviz_cfg],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
         additional_env={
@@ -95,9 +121,14 @@ def generate_launch_description():
         use_sim_time_arg,
         odom_is_local_arg,
         world_name_arg,
+        waypoints_arg,
+        headless_arg,
+        enable_rviz_arg,
+        enable_obstacle_avoidance_arg,
         gz_resource_path,
         ign_resource_path,
-        gz_sim_launch,
+        gz_sim_headless_launch,
+        gz_sim_gui_launch,
         spawn_and_boids,
         rviz_node,
     ])
@@ -122,6 +153,8 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
     use_sim_time = context.launch_configurations.get('use_sim_time', 'false')
     odom_is_local = context.launch_configurations.get('odom_is_local', 'true').lower() == 'true'
+    enable_obstacle_avoidance = context.launch_configurations.get('enable_obstacle_avoidance', 'false').lower() == 'true'
+    waypoints = _parse_float_list(context.launch_configurations.get('waypoints', ''))
     start_x, start_y = 2.0, 4.5
     spacing = 0.7
 
@@ -236,6 +269,9 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                             'spawn_x': x,
                             'spawn_y': y,
                             'odom_is_local': odom_is_local,
+                            'use_monitor_waypoint': True,
+                            'enable_obstacle_avoidance': enable_obstacle_avoidance,
+                            'waypoints': waypoints,
                             'use_sim_time': use_sim_time == 'true',
                         },
                     ],
@@ -254,6 +290,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
             params_file,
             {
                 'num_robots': num_robots,
+                'waypoints': waypoints,
                 'use_sim_time': use_sim_time == 'true',
             },
         ],
@@ -262,6 +299,25 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     actions.append(monitor)
 
     return actions
+
+
+  def _parse_float_list(text: str):
+    """Parse a launch argument list from Python-literal or CSV form."""
+    if text is None:
+      return []
+
+    text = str(text).strip()
+    if not text:
+      return []
+
+    try:
+      parsed = ast.literal_eval(text)
+      if isinstance(parsed, (list, tuple)):
+        return [float(v) for v in parsed]
+    except Exception:
+      pass
+
+    return [float(v.strip()) for v in text.split(',') if v.strip()]
 
 
 def _harmonic_robot_sdf(robot_ns: str) -> str:

@@ -29,8 +29,11 @@ def generate_launch_description():
             'num_robots', default_value='6',
             description='Number of robots in simulation'),
         DeclareLaunchArgument(
-            'world_name', default_value='obstacle_course',
+            'world_name', default_value='open_field',
             description='World basename used by gazebo backend'),
+        DeclareLaunchArgument(
+            'headless', default_value='true',
+            description='When using gazebo backend, run server only (no GUI window)'),
         DeclareLaunchArgument(
             'gazebo_flavor', default_value='auto',
             description='Gazebo backend flavor: auto, harmonic, or classic'),
@@ -44,13 +47,16 @@ def generate_launch_description():
             'enable_rviz', default_value='false',
             description='Launch RViz when running headless backend'),
         DeclareLaunchArgument(
+            'enable_obstacle_avoidance', default_value='false',
+            description='Enable boid obstacle avoidance logic'),
+        DeclareLaunchArgument(
             'success_timeout_s', default_value='300.0',
             description='Monitor timeout in seconds before completion'),
         DeclareLaunchArgument(
             'auto_shutdown_on_completion', default_value='true',
             description='Auto-stop nodes when monitor completes'),
         DeclareLaunchArgument(
-            'waypoints', default_value='[8.0, 7.5, 15.0, 7.5, 22.0, 7.5, 28.0, 7.5]',
+            'waypoints', default_value='[5.5, 6.0, 8.5, 7.2, 11.5, 8.5, 14.5, 9.3, 17.0, 10.0]',
             description='Flat waypoint list [x0,y0,x1,y1,...] for headless backend'),
         DeclareLaunchArgument(
             'spawn_coords',
@@ -119,10 +125,14 @@ def _dispatch_backend(context, *args, **kwargs):
                     ),
                     launch_arguments={
                         'num_robots': context.launch_configurations.get('num_robots', '6'),
-                        'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
+                        'world_name': context.launch_configurations.get('world_name', 'open_field'),
                         # Harmonic can run without bridged /clock; keep ROS timers alive.
                         'use_sim_time': 'false',
                         'odom_is_local': context.launch_configurations.get('odom_is_local', 'true'),
+                        'headless': context.launch_configurations.get('headless', 'true'),
+                        'enable_rviz': context.launch_configurations.get('enable_rviz', 'false'),
+                        'enable_obstacle_avoidance': context.launch_configurations.get('enable_obstacle_avoidance', 'false'),
+                        'waypoints': context.launch_configurations.get('waypoints', ''),
                     }.items(),
                 ),
             ]
@@ -136,7 +146,7 @@ def _dispatch_backend(context, *args, **kwargs):
                     ),
                     launch_arguments={
                         'num_robots': context.launch_configurations.get('num_robots', '6'),
-                        'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
+                        'world_name': context.launch_configurations.get('world_name', 'open_field'),
                         'use_sim_time': 'true',
                     }.items(),
                 ),
