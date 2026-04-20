@@ -55,8 +55,8 @@ def generate_launch_description():
       'world_name', default_value='obstacle_course', description='World basename from swarm_flocking_gazebo/worlds')
     waypoints_arg = DeclareLaunchArgument(
       'waypoints',
-      default_value='[28.0, 7.5]',
-      description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor',
+      default_value='',
+      description='Flat waypoint list [x0,y0,x1,y1,...] used by boids and monitor (empty = world-specific defaults)',
     )
     spawn_origin_x_arg = DeclareLaunchArgument(
       'spawn_origin_x', default_value='4.0', description='Spawn grid origin X in world frame')
@@ -71,7 +71,7 @@ def generate_launch_description():
     spawn_yaw_arg = DeclareLaunchArgument(
       'spawn_yaw', default_value='0.25', description='Initial yaw (rad) for spawned robots')
     headless_arg = DeclareLaunchArgument(
-      'headless', default_value='true', description='Run Gazebo server only (no GUI window)')
+      'headless', default_value='false', description='Run Gazebo server only (no GUI window)')
     enable_rviz_arg = DeclareLaunchArgument(
       'enable_rviz', default_value='false', description='Launch RViz viewer')
     enable_obstacle_avoidance_arg = DeclareLaunchArgument(
@@ -171,8 +171,19 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     num_robots = int(context.launch_configurations.get('num_robots', '6'))
     use_sim_time = context.launch_configurations.get('use_sim_time', 'false')
     odom_is_local = context.launch_configurations.get('odom_is_local', 'false').lower() == 'true'
+    world_name = context.launch_configurations.get('world_name', 'obstacle_course').strip().lower()
     enable_obstacle_avoidance = context.launch_configurations.get('enable_obstacle_avoidance', 'false').lower() == 'true'
     waypoints = _parse_float_list(context.launch_configurations.get('waypoints', ''))
+    if not waypoints:
+      if world_name == 'open_field':
+        # Open-field demo: direct endpoint only.
+        waypoints = [17.0, 10.0]
+      elif world_name == 'obstacle_course':
+        # Obstacle-course guidance: bottleneck gap -> maze corridor -> final goal.
+        waypoints = [8.5, 7.5, 25.2, 9.8, 28.0, 7.5]
+      else:
+        # Conservative fallback for unknown worlds.
+        waypoints = [17.0, 10.0]
     start_x = float(context.launch_configurations.get('spawn_origin_x', '4.0'))
     start_y = float(context.launch_configurations.get('spawn_origin_y', '6.0'))
     spacing_x = float(context.launch_configurations.get('spawn_spacing_x', '1.0'))
