@@ -119,7 +119,7 @@
     rolling_window_s: 10.0
     goal_tolerance: 1.2
     waypoint_reach_radius: 1.5
-    waypoint_reach_fraction: 0.67
+    waypoint_reach_fraction: 0.60
     waypoint_bottleneck_guard_enable: true
     waypoint_bottleneck_guard_margin: 0.25
     waypoint_guard_window_x: 1.2
@@ -131,7 +131,8 @@
     default_w_cohesion_restore: 1.6
     default_w_migration_restore: 0.68
     success_timeout_s: 600.0
-    timeout_progress_grace_s: 180.0
+    timeout_progress_grace_s: 240.0
+    timeout_progress_min_delta_m: 0.08
     success_max_collision_rate: 0.20
     success_max_mean_cohesion: 3.5
     auto_shutdown_on_completion: true

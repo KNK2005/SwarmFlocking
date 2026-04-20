@@ -133,6 +133,7 @@ class FlockMonitorNode(Node):
         self.declare_parameter('default_w_migration_restore', 0.3)
         self.declare_parameter('success_timeout_s', 300.0)
         self.declare_parameter('timeout_progress_grace_s', 180.0)
+        self.declare_parameter('timeout_progress_min_delta_m', 0.08)
         self.declare_parameter('success_max_collision_rate', 0.20)
         self.declare_parameter('success_max_mean_cohesion', 3.5)
         self.declare_parameter('auto_shutdown_on_completion', True)
@@ -158,6 +159,7 @@ class FlockMonitorNode(Node):
         self.default_w_migration_restore = max(0.0, float(self.get_parameter('default_w_migration_restore').value))
         self.success_timeout_s = max(1.0, float(self.get_parameter('success_timeout_s').value))
         self.timeout_progress_grace_s = max(1.0, float(self.get_parameter('timeout_progress_grace_s').value))
+        self.timeout_progress_min_delta_m = max(0.001, float(self.get_parameter('timeout_progress_min_delta_m').value))
         self.success_max_collision_rate = max(0.0, float(self.get_parameter('success_max_collision_rate').value))
         self.success_max_mean_cohesion = max(0.0, float(self.get_parameter('success_max_mean_cohesion').value))
         self.auto_shutdown_on_completion = bool(self.get_parameter('auto_shutdown_on_completion').value)
@@ -183,6 +185,7 @@ class FlockMonitorNode(Node):
         self._shutdown_timer = None
         self._last_log_time = 0.0
         self._last_waypoint_advance_time: Optional[float] = None
+        self._best_active_wp_min_dist: Optional[float] = None
         self.split_timer = 0.0
         self.split_events_count = 0
         self._split_started_at = None
@@ -360,6 +363,16 @@ class FlockMonitorNode(Node):
 
         active_wp = self._get_active_waypoint()
         if active_wp is not None:
+            active_wp_min_dist = min(
+                math.hypot(self.robot_states[rid].x - active_wp[0], self.robot_states[rid].y - active_wp[1])
+                for rid in active_ids
+            )
+            if self._best_active_wp_min_dist is None:
+                self._best_active_wp_min_dist = active_wp_min_dist
+            elif (self._best_active_wp_min_dist - active_wp_min_dist) >= self.timeout_progress_min_delta_m:
+                self._best_active_wp_min_dist = active_wp_min_dist
+                self._last_waypoint_advance_time = now
+
             near_count = sum(
                 1
                 for rid in active_ids
@@ -372,6 +385,7 @@ class FlockMonitorNode(Node):
                 self.current_waypoint_index += 1
                 self.waypoints_completed = max(self.waypoints_completed, self.current_waypoint_index)
                 self._last_waypoint_advance_time = now
+                self._best_active_wp_min_dist = None
                 active_wp = self._get_active_waypoint()
                 if active_wp is not None:
                     self.get_logger().info(
