@@ -33,7 +33,7 @@ sudo apt install -y \
 Optional GUI simulator backend on Jazzy:
 
 ```bash
-sudo apt install -y ros-jazzy-ros-gz ros-jazzy-ros-gz-sim
+sudo apt install -y ros-jazzy-ros-gz ros-jazzy-ros-gz-sim ros-jazzy-ros-gz-bridge
 ```
 
 ### 2. Initialize rosdep
@@ -77,8 +77,13 @@ Gazebo backend (if installed):
 
 ```bash
 ros2 launch swarm_flocking portable_sim.launch.py \
-  backend:=gazebo num_robots:=6 world_name:=obstacle_course
+  backend:=gazebo gazebo_flavor:=harmonic num_robots:=6 world_name:=obstacle_course
 ```
+
+Notes:
+- `gazebo_flavor:=harmonic` uses `ros_gz_sim` + `ros_gz_bridge` (Gazebo Harmonic).
+- `gazebo_flavor:=classic` uses `gazebo_ros` + TurtleBot3 Gazebo packages (Gazebo Classic).
+- `gazebo_flavor:=auto` (default) prefers Harmonic when available, then Classic, then falls back to headless.
 
 ## Ubuntu 22.04 Quick Start (ROS 2 Humble)
 
@@ -144,7 +149,7 @@ Gazebo backend:
 
 ```bash
 ros2 launch swarm_flocking portable_sim.launch.py \
-  backend:=gazebo num_robots:=6 world_name:=obstacle_course
+  backend:=gazebo gazebo_flavor:=classic num_robots:=6 world_name:=obstacle_course
 ```
 
 ## Monitoring and Tuning

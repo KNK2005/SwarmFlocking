@@ -8,7 +8,7 @@ Backends:
 
 Examples:
   ros2 launch swarm_flocking portable_sim.launch.py
-  ros2 launch swarm_flocking portable_sim.launch.py backend:=gazebo num_robots:=6 world_name:=open_field
+    ros2 launch swarm_flocking portable_sim.launch.py backend:=gazebo gazebo_flavor:=harmonic num_robots:=6 world_name:=open_field
 """
 
 import os
@@ -31,6 +31,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'world_name', default_value='obstacle_course',
             description='World basename used by gazebo backend'),
+        DeclareLaunchArgument(
+            'gazebo_flavor', default_value='auto',
+            description='Gazebo backend flavor: auto, harmonic, or classic'),
         DeclareLaunchArgument(
             'dt', default_value='0.1',
             description='Physics timestep for headless backend'),
@@ -57,6 +60,7 @@ def generate_launch_description():
 def _dispatch_backend(context, *args, **kwargs):
     pkg_flocking = get_package_share_directory('swarm_flocking')
     backend = context.launch_configurations.get('backend', 'headless').strip().lower()
+    gazebo_flavor = context.launch_configurations.get('gazebo_flavor', 'auto').strip().lower()
 
     def _headless_include(force_rviz: bool = False):
         rviz_arg = context.launch_configurations.get('enable_rviz', 'false')
@@ -80,36 +84,67 @@ def _dispatch_backend(context, *args, **kwargs):
         )
 
     if backend == 'gazebo':
-        # full_sim.launch.py uses Gazebo Classic spawn_entity flow. On Jazzy,
-        # many systems only have gz-sim packages, so we degrade gracefully.
-        missing_pkgs = []
+        if gazebo_flavor not in ('auto', 'harmonic', 'classic'):
+            raise RuntimeError(
+                f"Unsupported gazebo_flavor '{gazebo_flavor}'. Expected auto, harmonic, or classic."
+            )
+
+        harmonic_missing = []
+        classic_missing = []
+
+        for pkg in ('ros_gz_sim', 'ros_gz_bridge'):
+            try:
+                get_package_share_directory(pkg)
+            except Exception:
+                harmonic_missing.append(pkg)
+
         for pkg in ('gazebo_ros', 'turtlebot3_gazebo', 'turtlebot3_description'):
             try:
                 get_package_share_directory(pkg)
             except Exception:
-                missing_pkgs.append(pkg)
+                classic_missing.append(pkg)
 
-        if missing_pkgs:
-            msg = (
-                '[portable_sim] backend:=gazebo requested, but required Gazebo Classic '
-                f'packages are missing: {missing_pkgs}. Falling back to backend:=headless.'
-            )
+        harmonic_ready = len(harmonic_missing) == 0
+        classic_ready = len(classic_missing) == 0
+
+        if gazebo_flavor in ('auto', 'harmonic') and harmonic_ready:
             return [
-                LogInfo(msg=msg),
-                _headless_include(force_rviz=True),
+                LogInfo(msg='[portable_sim] Launching Gazebo Harmonic backend (ros_gz).'),
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(pkg_flocking, 'launch', 'full_sim_harmonic.launch.py')
+                    ),
+                    launch_arguments={
+                        'num_robots': context.launch_configurations.get('num_robots', '6'),
+                        'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
+                        'use_sim_time': 'true',
+                    }.items(),
+                ),
             ]
 
-        return [
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(pkg_flocking, 'launch', 'full_sim.launch.py')
+        if gazebo_flavor in ('auto', 'classic') and classic_ready:
+            return [
+                LogInfo(msg='[portable_sim] Launching Gazebo Classic backend (gazebo_ros).'),
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(pkg_flocking, 'launch', 'full_sim.launch.py')
+                    ),
+                    launch_arguments={
+                        'num_robots': context.launch_configurations.get('num_robots', '6'),
+                        'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
+                        'use_sim_time': 'true',
+                    }.items(),
                 ),
-                launch_arguments={
-                    'num_robots': context.launch_configurations.get('num_robots', '6'),
-                    'world_name': context.launch_configurations.get('world_name', 'obstacle_course'),
-                    'use_sim_time': 'true',
-                }.items(),
-            )
+            ]
+
+        msg = (
+            '[portable_sim] backend:=gazebo requested, but no supported Gazebo stack is fully available. '
+            f'harmonic missing={harmonic_missing}, classic missing={classic_missing}. '
+            'Falling back to backend:=headless.'
+        )
+        return [
+            LogInfo(msg=msg),
+            _headless_include(force_rviz=True),
         ]
 
     if backend == 'headless':
