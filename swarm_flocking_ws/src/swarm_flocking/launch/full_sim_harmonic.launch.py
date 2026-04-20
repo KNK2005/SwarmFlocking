@@ -119,18 +119,6 @@ def _spawn_all_harmonic(context, *args, **kwargs):
     start_x, start_y = 2.0, 4.5
     spacing = 0.7
 
-    # One bridge handles clock + all robot topics.
-    bridge_args = [
-        '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-    ]
-    for i in range(num_robots):
-        ns = f'robot_{i}'
-        bridge_args.extend([
-            f'/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-            f'/{ns}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-            f'/{ns}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-        ])
-
     actions = [
       # RViz often uses map as fixed frame while Gazebo odom streams are in odom.
       # Publish an identity transform so odom messages can be transformed to map.
@@ -144,11 +132,28 @@ def _spawn_all_harmonic(context, *args, **kwargs):
         RosNode(
             package='ros_gz_bridge',
             executable='parameter_bridge',
-            name='ros_gz_bridge_swarm',
-            arguments=bridge_args,
+        name='ros_gz_bridge_clock',
+        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
             output='screen',
-        )
+      ),
     ]
+
+    # Use one bridge process per robot to keep command and telemetry routing isolated.
+    for i in range(num_robots):
+      ns = f'robot_{i}'
+      actions.append(
+        RosNode(
+          package='ros_gz_bridge',
+          executable='parameter_bridge',
+          name=f'ros_gz_bridge_{ns}',
+          arguments=[
+            f'/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+            f'/{ns}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+            f'/{ns}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+          ],
+          output='screen',
+        )
+      )
 
     tmp_dir = tempfile.mkdtemp(prefix='swarm_harmonic_')
 
@@ -178,10 +183,10 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                     executable='create',
                     arguments=[
                         '-name', ns,
-                      '-allow_renaming', 'true',
+                        '-allow_renaming', 'false',
                         '-x', str(x),
                         '-y', str(y),
-                      '-z', '0.0',
+                        '-z', '0.0',
                         '-file', sdf_path,
                     ],
                     output='screen',
@@ -204,7 +209,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                             'num_robots': num_robots,
                             'spawn_x': x,
                             'spawn_y': y,
-                          'odom_is_local': False,
+                            'odom_is_local': False,
                             'use_sim_time': use_sim_time == 'true',
                         },
                     ],

@@ -213,6 +213,7 @@ class BoidNode(Node):
             f'BoidNode started — robot_id={self.robot_id}, '
             f'num_robots={self.num_robots}, '
             f'spawn_offset=({self.spawn_x:.1f}, {self.spawn_y:.1f}), '
+            f'odom_mode={"local+offset" if self.odom_is_local else "world"}, '
             f'waypoints={self.waypoints}')
 
     # ====================================================================
