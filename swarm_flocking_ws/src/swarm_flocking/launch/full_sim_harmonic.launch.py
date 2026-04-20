@@ -209,7 +209,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                             'num_robots': num_robots,
                             'spawn_x': x,
                             'spawn_y': y,
-                            'odom_is_local': False,
+                          'odom_is_local': True,
                             'use_sim_time': use_sim_time == 'true',
                         },
                     ],
