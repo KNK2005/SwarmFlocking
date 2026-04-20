@@ -147,8 +147,8 @@ def _spawn_all_harmonic(context, *args, **kwargs):
           executable='parameter_bridge',
           name=f'ros_gz_bridge_{ns}',
           arguments=[
-            f'/model/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-            f'/model/{ns}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+            f'/{ns}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+            f'/{ns}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             f'/{ns}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
           ],
           output='screen',
@@ -202,10 +202,6 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                     executable='boid_node',
                     name=f'boid_{i}',
                     namespace=ns,
-                  remappings=[
-                    (f'/{ns}/cmd_vel', f'/model/{ns}/cmd_vel'),
-                    (f'/{ns}/odom', f'/model/{ns}/odometry'),
-                  ],
                     parameters=[
                         params_file,
                         {
@@ -213,7 +209,7 @@ def _spawn_all_harmonic(context, *args, **kwargs):
                             'num_robots': num_robots,
                             'spawn_x': x,
                             'spawn_y': y,
-                          'odom_is_local': True,
+                            'odom_is_local': False,
                             'use_sim_time': use_sim_time == 'true',
                         },
                     ],
@@ -434,8 +430,8 @@ def _harmonic_robot_sdf(robot_ns: str) -> str:
       <right_joint>right_wheel_joint</right_joint>
       <wheel_separation>0.17</wheel_separation>
       <wheel_radius>0.033</wheel_radius>
-      <topic>cmd_vel</topic>
-      <odom_topic>odometry</odom_topic>
+      <topic>/{robot_ns}/cmd_vel</topic>
+      <odom_topic>/{robot_ns}/odom</odom_topic>
       <frame_id>odom</frame_id>
       <child_frame_id>{robot_ns}/base_footprint</child_frame_id>
       <max_linear_velocity>0.22</max_linear_velocity>
