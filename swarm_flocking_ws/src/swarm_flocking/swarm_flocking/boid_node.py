@@ -162,6 +162,7 @@ class BoidNode(Node):
         self._stall_wp: int = -1
         self._stall_count: int = 0
         self._last_desync_log_time: float = 0.0
+        self._progress_wp_idx: int = -1
 
         # Waypoint pointer
         self.current_wp: int = 0
@@ -1019,6 +1020,13 @@ class BoidNode(Node):
                 f'robot_{self.robot_id} reached waypoint {self.current_wp} '
                 f'({gx}, {gy}) → advancing')
             self.current_wp += 1
+            # Reset progress baseline for the new waypoint to avoid false stall escalation.
+            self._progress_wp_idx = -1
+            self._last_wp_dist = None
+            self._last_progress_time = time.monotonic()
+            self._desync_until = 0.0
+            self._stall_wp = -1
+            self._stall_count = 0
 
     def _count_active_neighbours(self) -> int:
         """Count fresh neighbour poses irrespective of distance."""
@@ -1153,19 +1161,26 @@ class BoidNode(Node):
             self._desync_until = 0.0
             self._stall_wp = -1
             self._stall_count = 0
+            self._progress_wp_idx = -1
             return
 
-        if self._last_wp_dist is None:
+        # Reset progress reference whenever we start tracking a different waypoint.
+        if self._progress_wp_idx != self.current_wp or self._last_wp_dist is None:
+            self._progress_wp_idx = self.current_wp
             self._last_wp_dist = wp_dist
             self._last_progress_time = now
             return
 
         improvement = self._last_wp_dist - wp_dist
+        relaxed_progress = max(0.02, 0.35 * self.progress_min_delta)
+
         if improvement >= self.progress_min_delta:
             self._last_progress_time = now
             self._stall_count = max(0, self._stall_count - 1)
-
-        if wp_dist < self._last_wp_dist:
+            self._last_wp_dist = wp_dist
+        elif improvement >= relaxed_progress:
+            # Slow but monotonic progress should postpone desync assist.
+            self._last_progress_time = now
             self._last_wp_dist = wp_dist
 
         if wp_dist <= (1.5 * self.wp_arrival_r):
